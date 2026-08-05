@@ -6,6 +6,7 @@ from fastmcp.client import (
 from mcp.types import SamplingCapability
 import asyncio
 import os
+import uuid
 
 # ======================================================
 # Path to the MCP Server
@@ -69,9 +70,12 @@ async def sampling_handler(messages, params, context):
 
     print("\n========== Sampling Request ==========\n")
 
-    prompt = messages[0].content.text
-
-    print(prompt.strip())
+    # `messages` is now the full session history (rolling buffer), not just
+    # a single prompt. messages[0] used to be the whole thing; now it's just
+    # the oldest message kept in the buffer. Print the full conversation so
+    # you can see what the server is actually sending.
+    for m in messages:
+        print(f"[{m.role}] {m.content.text.strip()}")
 
     print("\n========== Generating Response ==========\n")
 
@@ -225,10 +229,17 @@ async def main():
 
         print("\n========== Calling request_student_evaluation ==========\n")
 
+        # session_id is now REQUIRED by the server (used to key the rolling
+        # buffer of chat history). Generate one per run, or hardcode a fixed
+        # string if you want repeated runs to keep building on the same
+        # conversation history instead of starting fresh each time.
+        session_id = str(uuid.uuid4())
+
         result = await client.call_tool(
             "request_student_evaluation",
             {
-                "student_id": 1
+                "student_id": 1,
+                "session_id": session_id
             }
         )
 
