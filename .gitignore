@@ -6,3 +6,4 @@ venv/
 *.env
 .DS_Store
 *.log
+rag/chroma_db/
