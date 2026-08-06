@@ -38,3 +38,25 @@ CREATE TABLE IF NOT EXISTS certificates (
     certificate_code TEXT UNIQUE NOT NULL,
     FOREIGN KEY (enrollment_id) REFERENCES enrollments(enrollment_id)
 );
+
+
+CREATE TABLE episodic_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER,
+    session_id TEXT,
+    event_type TEXT,       
+    event_summary TEXT,      
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE semantic_facts (
+    fact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER,
+    fact_text TEXT,          
+    version INTEGER DEFAULT 1,
+    is_current BOOLEAN DEFAULT 1,
+    valid_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    valid_until TIMESTAMP,   
+    superseded_by INTEGER     
+);
