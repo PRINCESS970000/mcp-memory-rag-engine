@@ -155,10 +155,28 @@ def load_policy_file(filepath: Path) -> list[PolicyChunk]:
 
 
 def load_all_policies() -> list[PolicyChunk]:
-    """Reads every .md file in policies/ and returns all chunks combined."""
+    """
+    Reads every .md file in policies/ and returns all chunks combined.
+
+    Cross-references are made bidirectional here: if chunk A's text says
+    "see Policy X, Section Y" (a link to chunk B), but chunk B's own text
+    never links back to A, agentic RAG's hop-2 logic would only ever
+    discover the connection when starting from A, not from B. Since a
+    multi-hop question can land on either chunk first depending on its
+    phrasing, we add the reverse link automatically so hop-2 works from
+    either direction.
+    """
     all_chunks = []
     for filepath in sorted(POLICIES_DIR.glob("*.md")):
         all_chunks.extend(load_policy_file(filepath))
+
+    chunks_by_id = {c.chunk_id: c for c in all_chunks}
+    for chunk in all_chunks:
+        for ref_id in chunk.cross_refs:
+            target = chunks_by_id.get(ref_id)
+            if target and chunk.chunk_id not in target.cross_refs:
+                target.cross_refs.append(chunk.chunk_id)
+
     return all_chunks
 
 

@@ -112,8 +112,6 @@ def main():
         # naive
         results, elapsed = run_naive(collection, question)
         hit = is_hit(expected, results)
-        if qid == "G2":
-            print(f"    DEBUG G2 naive -> returned: {[c.chunk_id for c, _ in results]}, expected: {expected}, hit: {hit}")
         answer, in_tok, out_tok = maybe_generate(question, results, args.generate)
         stats["naive"][category].append({
             "id": qid, "hit": hit, "latency": elapsed,

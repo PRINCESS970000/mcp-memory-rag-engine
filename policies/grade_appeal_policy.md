@@ -39,4 +39,4 @@ of a posted grade.
 
 ## Section 5 — Who May Resolve an Appeal
 Only the instructor assigned to the course, or an account with role
-ADMIN, may approve or reject a grade appeal. See the Grading Permissions Policy, Section 2, for the full rule on who may update a grade.
+ADMIN, may approve or reject a grade appeal. See the Grading Permissions Policy, Section 2, for the full rule on who may update a grade. If the reviewer and the student are connected outside this appeal, see the Grading Permissions Policy, Section 4, for the conflict-of-interest rule that applies.
