@@ -221,3 +221,34 @@ def _handle_db_tool_question(student_id: int, question: str) -> dict:
         answer = f"Student: {data['name']} ({data['email']}), role: {data['role']}"
 
     return {"answer": answer, "db_source": "get_student_profile"}  
+
+if __name__ == "__main__":
+    session_id = "demo_session"
+    student_id = 7
+
+    stm = ShortTermMemory(
+        session_id=session_id,
+        student_id=student_id,
+    )
+
+    print("=" * 60)
+    print("BrightPeak Academic Agent")
+    print("Type 'exit' to quit.")
+    print("=" * 60)
+
+    while True:
+        message = input("\nYou: ")
+
+        if message.lower() in ("exit", "quit"):
+            print("Goodbye!")
+            break
+
+        result = handle_message(stm, student_id, message)
+
+        print("\nIntent:", result["intent"])
+        print("\nAnswer:")
+        print(result["answer"])
+
+        if result.get("verification"):
+            print("\nVerification:")
+            print(result["verification"])
