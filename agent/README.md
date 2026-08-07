@@ -81,6 +81,13 @@ change, since both pairs share the same function signatures.
   the three routing branches (the tools already exist and are already
   tested from the earlier MCP Server Lab) and is the next piece planned.
 
+## `db_tool` intent — now wired
+`_handle_db_tool_question` reuses `server.py`'s existing `get_student_profile()`
+tool directly (no duplication). Since that tool takes an email, not a
+student_id, `_get_student_email()` bridges the two via a direct read of
+the `students` table, using the same `get_db_connection()` helper
+`server.py` itself uses.
+
 ## How to run the demo
 
 ```bash

@@ -4,6 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "memory"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "rag"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "context_eval"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "mcp_server"))
 
 from intent_router import route_intent          # agent/intent_router.py (renamed)
 
@@ -40,7 +41,7 @@ def handle_message(stm: ShortTermMemory, student_id: int, message: str) -> dict:
     elif intent == "memory":
         result.update(_handle_memory_question(student_id, message))
     else:
-        result["answer"] = "[db_tool routing not yet wired -- reuses existing MCP tools directly]"
+        result.update(_handle_db_tool_question(student_id, message))
 
     stm.add_message(role="assistant", content=str(result["answer"]))
     _maybe_compact_buffer(stm)
@@ -165,4 +166,58 @@ def _check_agentic_relevance(retrieved: list) -> tuple[bool, str]:
             f"Top result ({top_chunk.chunk_id}) scored {top_score:.4f} (RRF scale), "
             f"below the floor of {AGENTIC_RELEVANCE_FLOOR}."
         )
-    return True, f"Top result ({top_chunk.chunk_id}) scored {top_score:.4f} (RRF scale), above floor."    
+    return True, f"Top result ({top_chunk.chunk_id}) scored {top_score:.4f} (RRF scale), above floor."  
+
+def _get_student_email(student_id: int) -> str | None:
+    """
+    Looks up a student's email from their id, reusing the same DB
+    connection helper server.py uses -- get_student_profile() only
+    accepts an email, not a student_id, so this bridges the two without
+    duplicating or modifying server.py's own logic.
+    """
+    from server import get_db_connection
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT email FROM students WHERE student_id = ?", (student_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row["email"] if row else None
+
+
+def _handle_db_tool_question(student_id: int, question: str) -> dict:
+    """
+    Handles factual lookups answerable by the existing MCP tools directly
+    -- no retrieval, no memory, just a real DB read via server.py's
+    already-tested tools (reused, not duplicated).
+
+    Currently supports profile/enrollment/grade questions via
+    get_student_profile(). Course-catalog questions (list_all_courses)
+    are not yet routed here -- see Known gaps in README.
+    """
+    from server import get_student_profile
+
+    email = _get_student_email(student_id)
+    if email is None:
+        return {"answer": f"No student found with id {student_id}."}
+
+    result = get_student_profile(email)
+    if result["status"] != "success":
+        return {"answer": f"Could not retrieve student data: {result['message']}"}
+
+    data = result["data"]
+    question_lower = question.lower()
+
+    if "grade" in question_lower or "course" in question_lower or "enrolled" in question_lower:
+        if not data["enrolled_courses"]:
+            answer = f"{data['name']} is not currently enrolled in any courses."
+        else:
+            lines = [
+                f"{c['title']}: grade={c['grade']}, status={c['status']}"
+                for c in data["enrolled_courses"]
+            ]
+            answer = f"{data['name']}'s courses — " + "; ".join(lines)
+    else:
+        answer = f"Student: {data['name']} ({data['email']}), role: {data['role']}"
+
+    return {"answer": answer, "db_source": "get_student_profile"}  
