@@ -441,13 +441,9 @@ async def request_student_evaluation(student_id: int, session_id: str, ctx: Cont
     store_message(session_id=session_id, role="user", content=user_prompt, student_id=student_id)
 
     # 2. Pull the session's history back out as a proper list of messages
-    history = get_chat_history(session_id=session_id)
-    messages_list = history["messages"]
-
-    # 3. Ask the client model using the full message list (not a single string)
     response = await ctx.sample(
-        messages=messages_list,
-        max_tokens=150
+    messages=user_prompt,
+    max_tokens=150
     )
 
     # 4. Persist the assistant's reply too, so the next call continues the same session

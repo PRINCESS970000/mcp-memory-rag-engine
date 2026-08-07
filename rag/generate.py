@@ -16,9 +16,6 @@ MODEL = "claude-sonnet-4-6"
 def generate_answer(question: str, retrieved_chunks: list[PolicyChunk]) -> str:
     """
     Generates an answer using ONLY the retrieved chunks as context.
-    The prompt explicitly instructs the model to say so if the chunks
-    don't contain the answer, rather than filling gaps from its own knowledge --
-    this is what makes the later Self-RAG support check meaningful to run.
     """
     context = "\n\n".join(
         f"[{c.document_id} — Section {c.section_id}: {c.section_title}]\n{c.text}"
@@ -26,6 +23,7 @@ def generate_answer(question: str, retrieved_chunks: list[PolicyChunk]) -> str:
     )
 
     prompt = f"""You are answering a question using ONLY the policy excerpts below.
+
 If the excerpts do not contain enough information to answer, say so explicitly --
 do not use any outside knowledge.
 
@@ -36,10 +34,22 @@ QUESTION: {question}
 
 Answer concisely, and cite the section number(s) you used."""
 
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=500,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}],
+        )
 
-    return response.content[0].text
+        return response.content[0].text
+
+    except anthropic.BadRequestError as e:
+        print(f"Anthropic API Error: {e}")
+        return (
+            "Unable to generate an answer because the Anthropic API "
+            "does not have sufficient credits."
+        )
+
+    except Exception as e:
+        print(f"Unexpected Error: {e}")
+        return "An unexpected error occurred while generating the answer."
