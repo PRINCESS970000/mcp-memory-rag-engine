@@ -1,19 +1,18 @@
 """
 Top-level intent routing for the agent loop.
-"""
 
-POLICY_KEYWORDS = [
-    "policy",
-    "deadline",
-    "allowed",
-    "eligib",
-    "appeal",
-    "reissue",
-    "grounds",
-    "section",
-    "procedure",
-    "process",
-]
+Priority order matters here: MEMORY > POLICY > DB_TOOL.
+
+POLICY is checked before DB_TOOL specifically because DB_KEYWORDS contains
+generic words like "grade" and "course" that also show up naturally inside
+policy questions (e.g. "grade appeal", "course withdrawal deadline"). If
+DB_TOOL were checked first, every policy question that happens to mention
+a DB-flavored word would be misrouted to a plain data lookup instead of
+retrieval -- which is exactly what happened before this fix: "What are
+the valid grounds for filing a grade appeal?" matched DB_KEYWORDS' "grade"
+and was routed to db_tool before POLICY_KEYWORDS' "appeal"/"grounds" ever
+got checked.
+"""
 
 MEMORY_KEYWORDS = [
     "remember",
@@ -33,6 +32,19 @@ MEMORY_KEYWORDS = [
     "have i",
 ]
 
+POLICY_KEYWORDS = [
+    "policy",
+    "deadline",
+    "allowed",
+    "eligib",
+    "appeal",
+    "reissue",
+    "grounds",
+    "section",
+    "procedure",
+    "process",
+]
+
 DB_KEYWORDS = [
     "grade",
     "grades",
@@ -46,27 +58,31 @@ DB_KEYWORDS = [
     "gpa",
 ]
 
+
 def route_intent(message: str) -> str:
     text = message.lower()
 
-    # Memory questions first
+    # Memory questions first -- referring to something discussed earlier
+    # always takes priority, regardless of what topic it's about.
     if any(k in text for k in MEMORY_KEYWORDS):
         return "memory"
 
-    # Database questions
-    if any(k in text for k in DB_KEYWORDS):
-        return "db_tool"
-
-    # Policy questions
+    # Policy questions next -- checked BEFORE the generic DB keywords,
+    # since policy questions often contain a DB-flavored word (see
+    # docstring above) but DB questions rarely contain a policy word.
     if any(k in text for k in POLICY_KEYWORDS):
         return "policy"
 
-    # Re-enrollment:
-    # if user asks to REMEMBER -> memory
-    # otherwise -> policy
+    # Database lookups -- factual questions about a specific student's
+    # current data.
+    if any(k in text for k in DB_KEYWORDS):
+        return "db_tool"
+
+    # Re-enrollment questions without any of the above keywords:
+    # "remember"/"previous"/"before" would already have been caught by
+    # MEMORY_KEYWORDS above, so reaching here means it's asking about the
+    # re-enrollment rule itself.
     if "re-enrollment" in text or "re enrollment" in text or "re-enroll" in text:
-        if "remember" in text or "previous" in text or "before" in text:
-            return "memory"
         return "policy"
 
     return "db_tool"
