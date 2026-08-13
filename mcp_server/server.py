@@ -109,6 +109,77 @@ def list_all_courses() -> dict:
         "courses": [dict(row) for row in rows]
     }
 
+@mcp.tool()
+def get_path_planning_data(student_id: int) -> dict:
+    """Return everything the learning-path planning agent needs for one student:
+    full course catalog, prerequisite edges, the student's completed courses,
+    their learning goal (target role / weekly hours / budget / deadline), and
+    the skills required for their target role.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # 1. Validate the student exists
+    cursor.execute("SELECT * FROM students WHERE student_id = ?", (student_id,))
+    student = cursor.fetchone()
+    if not student:
+        conn.close()
+        return {"status": "error", "message": f"Student {student_id} not found."}
+
+    # 2. Full course catalog (everything environment.py needs per course)
+    cursor.execute("""
+        SELECT course_id, title, instructor_id, credits, price, weekly_hours,
+               duration_weeks, start_date, end_date, difficulty, skill_tags
+        FROM courses
+    """)
+    courses = [dict(row) for row in cursor.fetchall()]
+
+    # 3. Prerequisite edges: course_id depends on prerequisite_course_id
+    cursor.execute("""
+        SELECT course_id, prerequisite_course_id
+        FROM course_prerequisites
+    """)
+    prerequisites = [dict(row) for row in cursor.fetchall()]
+
+    # 4. Courses this student has already completed
+    cursor.execute("""
+        SELECT course_id FROM enrollments
+        WHERE student_id = ? AND status = 'COMPLETED'
+    """, (student_id,))
+    completed_course_ids = [row["course_id"] for row in cursor.fetchall()]
+
+    # 5. The student's learning goal (may be None if they haven't set one)
+    cursor.execute("""
+        SELECT goal_id, target_role_id, weekly_hours_available, budget, target_date
+        FROM learning_goals
+        WHERE student_id = ?
+        ORDER BY goal_id DESC LIMIT 1
+    """, (student_id,))
+    goal_row = cursor.fetchone()
+    learning_goal = dict(goal_row) if goal_row else None
+
+    # 6. Skills required for the target role (only if a goal exists)
+    required_skills = []
+    if learning_goal:
+        cursor.execute("""
+            SELECT skill_tag FROM role_required_skills
+            WHERE role_id = ?
+        """, (learning_goal["target_role_id"],))
+        required_skills = [row["skill_tag"] for row in cursor.fetchall()]
+
+    conn.close()
+
+    return {
+        "status": "success",
+        "data": {
+            "student_id": student_id,
+            "courses": courses,
+            "prerequisites": prerequisites,
+            "completed_course_ids": completed_course_ids,
+            "learning_goal": learning_goal,
+            "required_skills": required_skills,
+        }
+    }
 
 @mcp.tool()
 def enroll_student(student_id: int, course_id: int) -> dict:
