@@ -41,6 +41,12 @@ class Environment:
             sys.path.insert(0, mcp_server_path)
         self._data_cache: dict | None = None
 
+    def get_catalog_data(self) -> dict:
+        """Public accessor for this session's cached student/catalog data --
+        the same dict reflexion() needs as its catalog_data argument, so
+        callers don't have to reach into the private _fetch_data()."""
+        return self._fetch_data()
+
     def _fetch_data(self) -> dict:
         # Cached per instance: within one planning session (one Reflexion
         # run or one LATS search) the student's catalog/goal don't change
