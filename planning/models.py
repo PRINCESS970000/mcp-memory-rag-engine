@@ -11,6 +11,23 @@ class Task(BaseModel):
     instruction: str = Field(min_length=5)
     depends_on: list[str] = Field(default_factory=list)
 
+    # --- BrightPeak extension (Person 1) -----------------------------------
+    # Names the real MCP tool this sub-task resolves with, e.g.
+    # "get_student_profile", "search_courses". None means the task is
+    # reasoning-only and gets routed to PS/ToT/LATS by planning/routing.py
+    # (person 2's file) instead of calling a tool directly. Required by the
+    # rubric: every DAG sub-task must declare "tool/method متوقع يتستخدم".
+    expected_tool: str | None = None
+
+    # Only meaningful when expected_tool is None. Feeds person 2's
+    # route_and_execute_subtask() keyword router (routing.py) so a
+    # reasoning-only task reliably lands on PS/ToT/LATS instead of
+    # depending on incidental wording in `instruction`. One of:
+    #   "deterministic_parsing"  -> Plan-and-Solve
+    #   "course_sequencing"      -> Tree of Thoughts
+    #   ""  (default)            -> LATS
+    category: str = ""
+
 
 class Plan(BaseModel):
     model_config = ConfigDict(extra="forbid")

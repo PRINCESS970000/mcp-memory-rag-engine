@@ -1,0 +1,90 @@
+
+from __future__ import annotations
+import argparse
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+from dotenv import load_dotenv
+from langchain_mistralai import ChatMistralAI
+
+from planning.algorithms import (
+    decompose_goal,
+    dynamic_decomposition,
+    execute_plan,
+    final_output,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def save_artifact(payload: dict) -> Path:
+    """Same shape/location as the toolkit's cli.py save_artifact -- one
+    JSON trace per run in artifacts/, reused rather than duplicated."""
+    artifact_dir = ROOT / "artifacts"
+    artifact_dir.mkdir(exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    path = artifact_dir / f"planning-agent-run-{stamp}.json"
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def run_learning_path_request(goal: str, llm, mode: str = "dag") -> dict:
+    """Main entry point: request in, trace + result out. `mode` picks
+    decomposition-first ("dag") or interleaved ("dynamic") -- both are
+    required to run against the same real request type per the rubric."""
+    payload: dict = {"mode": mode, "goal": goal}
+
+    if mode == "dag":
+        plan = decompose_goal(goal, llm)
+        outputs, metrics_by_task = execute_plan(plan, llm)
+        result = final_output(plan, outputs)
+        payload.update(
+            plan=plan.model_dump(),
+            execution_batches=plan.execution_batches(),
+            outputs=outputs,
+            metrics_by_task=metrics_by_task,
+            result=result,
+        )
+    elif mode == "dynamic":
+        history = dynamic_decomposition(goal, llm)
+        result = history[-1][1] if history else "Planner reported the goal was already complete."
+        payload.update(history=history, result=result)
+    else:
+        raise ValueError(f"Unknown mode: {mode!r} (expected 'dag' or 'dynamic')")
+
+    artifact_path = save_artifact(payload)
+    payload["artifact_path"] = str(artifact_path)
+    return payload
+
+
+def _cli() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="BrightPeak Learning Path Planning agent")
+    parser.add_argument("goal", help="The student's learning-path request, in plain text")
+    parser.add_argument("--mode", choices=["dag", "dynamic"], default="dag")
+    parser.add_argument("--model", default="mistral-small-latest")
+    return parser
+
+
+def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    args = _cli().parse_args()
+    load_dotenv(ROOT / ".env")
+    api_key = os.getenv("MISTRAL_API_KEY")
+    if not api_key:
+        raise RuntimeError("MISTRAL_API_KEY is missing; add it to .env")
+
+    llm = ChatMistralAI(api_key=api_key, model=args.model, random_seed=42, max_retries=2)
+
+    payload = run_learning_path_request(args.goal, llm, mode=args.mode)
+
+    print("\nRESULT\n======\n" + payload["result"])
+    print(f"\nRun artifact: {payload['artifact_path']}")
+
+
+if __name__ == "__main__":
+    main()

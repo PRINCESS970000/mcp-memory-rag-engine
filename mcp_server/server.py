@@ -322,6 +322,174 @@ async def generate_academic_report(ctx: Context) -> dict:
     }
 
 
+@mcp.tool(
+    name="get_role_requirements",
+    description="Returns the skill tags required for a target job role (e.g. 'Data Scientist'), "
+                "used to drive gap analysis against a student's completed courses."
+)
+def get_role_requirements(role_title: str) -> dict:
+    if not role_title or not role_title.strip():
+        return {"status": "error", "message": "role_title is required."}
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT role_id, title FROM job_roles WHERE title = ?", (role_title,))
+    role = cursor.fetchone()
+
+    if not role:
+        conn.close()
+        return {"status": "error", "message": f"No job role found matching '{role_title}'."}
+
+    cursor.execute(
+        "SELECT skill_tag FROM role_required_skills WHERE role_id = ?",
+        (role["role_id"],)
+    )
+    skills = [row["skill_tag"] for row in cursor.fetchall()]
+    conn.close()
+
+    return {
+        "status": "success",
+        "data": {
+            "role_id": role["role_id"],
+            "title": role["title"],
+            "required_skills": skills
+        }
+    }
+
+
+@mcp.tool(
+    name="search_courses",
+    description="Searches courses by required skill tags and optional budget/weekly-hours/start-date "
+                "constraints. Returns candidate courses for the planning agent to sequence."
+)
+def search_courses(
+    skill_tags: list = None,
+    max_price: float = None,
+    max_weekly_hours: float = None,
+    after_date: str = None
+) -> dict:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    query = "SELECT * FROM courses WHERE 1=1"
+    params = []
+
+    if max_price is not None:
+        query += " AND price <= ?"
+        params.append(max_price)
+
+    if max_weekly_hours is not None:
+        query += " AND weekly_hours <= ?"
+        params.append(max_weekly_hours)
+
+    if after_date is not None:
+        query += " AND start_date >= ?"
+        params.append(after_date)
+
+    cursor.execute(query, params)
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    if skill_tags:
+        wanted = set(skill_tags)
+        rows = [
+            r for r in rows
+            if wanted & set((r.get("skill_tags") or "").split(","))
+        ]
+
+    return {"status": "success", "count": len(rows), "courses": rows}
+
+
+@mcp.tool(
+    name="check_prerequisites",
+    description="Checks whether a student has completed all prerequisite courses for a given course. "
+                "This is the grounded check used before a course can be scheduled — it reads real "
+                "enrollment status, it does not ask the model."
+)
+def check_prerequisites(student_id: int, course_id: int) -> dict:
+    if student_id <= 0 or course_id <= 0:
+        return {"status": "error", "message": "student_id and course_id must be positive integers."}
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT prerequisite_course_id FROM course_prerequisites WHERE course_id = ?",
+        (course_id,)
+    )
+    required = [row["prerequisite_course_id"] for row in cursor.fetchall()]
+
+    if not required:
+        conn.close()
+        return {"status": "success", "eligible": True, "missing_prerequisites": []}
+
+    cursor.execute(
+        "SELECT course_id FROM enrollments WHERE student_id = ? AND status = 'COMPLETED'",
+        (student_id,)
+    )
+    completed = {row["course_id"] for row in cursor.fetchall()}
+    conn.close()
+
+    missing = [c for c in required if c not in completed]
+
+    return {
+        "status": "success",
+        "eligible": len(missing) == 0,
+        "missing_prerequisites": missing
+    }
+
+
+@mcp.tool(
+    name="save_learning_goal",
+    description="Records a student's active learning-path request: target role, weekly hours "
+                "available, and budget. Called once per planning session before decomposition starts."
+)
+def save_learning_goal(
+    student_id: int,
+    target_role_title: str,
+    weekly_hours_available: float,
+    budget: float,
+    target_date: str = None
+) -> dict:
+    if student_id <= 0:
+        return {"status": "error", "message": "student_id must be a positive integer."}
+
+    if weekly_hours_available <= 0:
+        return {"status": "error", "message": "weekly_hours_available must be greater than 0."}
+
+    if budget < 0:
+        return {"status": "error", "message": "budget cannot be negative."}
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT role_id FROM job_roles WHERE title = ?", (target_role_title,))
+    role = cursor.fetchone()
+    if not role:
+        conn.close()
+        return {"status": "error", "message": f"No job role found matching '{target_role_title}'."}
+
+    cursor.execute("SELECT student_id FROM students WHERE student_id = ?", (student_id,))
+    if not cursor.fetchone():
+        conn.close()
+        return {"status": "error", "message": f"Student ID {student_id} does not exist."}
+
+    try:
+        cursor.execute(
+            """INSERT INTO learning_goals
+               (student_id, target_role_id, weekly_hours_available, budget, target_date)
+               VALUES (?, ?, ?, ?, ?)""",
+            (student_id, role["role_id"], weekly_hours_available, budget, target_date)
+        )
+        conn.commit()
+        return {"status": "success", "goal_id": cursor.lastrowid}
+    except Exception as e:
+        return {"status": "error", "message": f"Database exception: {str(e)}"}
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Chat history / rolling buffer
 # ---------------------------------------------------------------------------

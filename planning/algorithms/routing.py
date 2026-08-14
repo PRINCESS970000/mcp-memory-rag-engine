@@ -1,3 +1,4 @@
+
 from typing import Dict, Any, Tuple
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -16,11 +17,11 @@ def route_and_execute_subtask(
     task_description = subtask.get("description", "")
     task_category = subtask.get("category", "").lower()
 
-    if any(k in task_category or k in task_description.lower() for k in ["extract", "parse", "format", "deterministic"]):
+    if any(k in task_category for k in ["extract", "parse", "format", "deterministic"]):
         algorithm_choice = "Plan-and-Solve"
         result, metrics = plan_and_solve(task_description, llm, task_type="deterministic_parsing")
 
-    elif any(k in task_category or k in task_description.lower() for k in ["rank", "sequence", "prerequisite", "select_courses"]):
+    elif any(k in task_category for k in ["rank", "sequence", "prerequisite", "select_courses"]):
         algorithm_choice = "Tree of Thoughts"
         result, metrics = tree_of_thoughts(task_description, llm, depth=2, beam_width=2, task_type="course_sequencing")
 
@@ -30,7 +31,6 @@ def route_and_execute_subtask(
 
     metrics["routed_algorithm"] = algorithm_choice
     
-    # طباعة صريحة للمخرجات في الـ Console
     print(f"\n[ROUTER] Assigned Subtask to -> {algorithm_choice}")
     print(f"[OUTPUT] -> {result}")
     
