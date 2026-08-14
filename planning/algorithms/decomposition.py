@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -110,14 +108,17 @@ Preserve the supplied goal exactly in the plan's goal field."""),
     return Plan.model_validate(payload)
 
 
-def execute_plan(plan: Plan, llm: BaseChatModel, environment: Environment | None = None, max_workers: int = 4) -> tuple[dict[str, str], dict[str, dict]]:
+def execute_plan(plan: Plan, llm: BaseChatModel, environment: Environment, max_workers: int = 4) -> tuple[dict[str, str], dict[str, dict]]:
     """Returns (outputs, metrics_by_task). metrics_by_task only has entries
     for tasks routed through PS/ToT/LATS (routing.py) -- tool-tasks and the
-    plain-LLM fallback don't produce per-algorithm metrics."""
-    # Person 3 replaces this default with a grounded Environment; the
-    # toolkit's randomized one is only a placeholder until then (LATS
-    # needs *some* Environment instance to run at all).
-    environment = environment or Environment()
+    plain-LLM fallback don't produce per-algorithm metrics.
+
+    `environment` is mandatory: it must be an `Environment(student_id=...)`
+    instance built for the specific student this plan is for. There is
+    deliberately no default here -- Environment.evaluate() checks real
+    per-student data (budget, hours, completed courses), so a plan
+    executed without an explicit environment would either crash or,
+    worse, silently check the wrong student's constraints."""
     outputs: dict[str, str] = {}
     metrics_by_task: dict[str, dict] = {}
     for batch in plan.execution_batches():

@@ -150,3 +150,31 @@ Return only the improved explanation.""",
         revised = revise_response.content[0].text.strip()
 
     return ReflectionResult(draft, critique, revised, grounded)
+
+
+def refine_synthesis_output(goal: str, draft: str, environment) -> ReflectionResult:
+    """Entry point for decomposition.py's synthesis task: the DAG's final
+    task (category="deterministic_parsing", the one that writes the
+    student-facing summary) produces `draft` as plain text with no
+    guaranteed structure. This wraps reflect_and_refine() so the caller
+    doesn't have to build path_courses/all_courses/total_price by hand --
+    it pulls them from the same Environment instance execute_plan() is
+    already using for this student, via the course_ids the draft mentions.
+
+    Import is deferred (function-local) to avoid a circular import:
+    environment.py doesn't import self_refine.py, but this keeps the
+    dependency one-directional regardless of import order elsewhere in
+    the package."""
+    from .environment import Environment  # local import: see docstring above
+
+    data = environment.get_catalog_data()
+    all_courses = data["courses"]
+    courses_by_id = {c["course_id"]: c for c in all_courses}
+
+    course_ids = Environment._extract_course_ids(
+        environment, draft, valid_ids=set(courses_by_id)
+    )
+    path_courses = [courses_by_id[cid] for cid in course_ids if cid in courses_by_id]
+    total_price = sum(c["price"] for c in path_courses)
+
+    return reflect_and_refine(goal, draft, path_courses, all_courses, total_price)
