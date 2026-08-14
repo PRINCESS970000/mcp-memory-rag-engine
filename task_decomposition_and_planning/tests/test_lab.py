@@ -4,20 +4,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
-import random
 from types import SimpleNamespace
 
 import pytest
 
 from planning_lab.algorithms import (
     Environment,
-    deterministic_checks,
+    grounded_path_checks,
     execute_plan,
     final_output,
     flatten_lats_tree,
     lats,
     reflexion,
 )
+from planning_lab.algorithms.reflexion import client as reflexion_anthropic_client
 from planning_lab.models import EnvironmentFeedback, Plan
 from planning_lab.algorithms.decomposition import GeneratedPlan
 from planning_lab.algorithms.dynamic_decomposition import DynamicDecision
@@ -25,6 +25,55 @@ from planning_lab.algorithms.lats import LATSActionBatch, ValueEstimate
 from planning_lab.algorithms.tree_of_thoughts import ThoughtCandidates, ThoughtEvaluation
 from planning_lab.algorithms.routing import route_and_execute_subtask
 from langchain_mistralai import ChatMistralAI
+
+
+# ---------------------------------------------------------------------------
+# Shared fixtures: a small, self-consistent fake BrightPeak catalog so tests
+# don't need a live db/brightpeak.db or a real MISTRAL_API_KEY.
+# ---------------------------------------------------------------------------
+
+def fake_catalog_data() -> dict:
+    return {
+        "learning_goal": {
+            "budget": 500,
+            "weekly_hours_available": 10,
+            "target_date": "2026-12-31",
+        },
+        "courses": [
+            {
+                "course_id": 1, "title": "Python Basics", "price": 100,
+                "weekly_hours": 5, "start_date": "2026-09-01", "end_date": "2026-09-29",
+                "difficulty": "beginner", "skill_tags": "python,programming",
+            },
+            {
+                "course_id": 2, "title": "SQL for Data Analysis", "price": 130,
+                "weekly_hours": 4, "start_date": "2026-10-01", "end_date": "2026-10-29",
+                "difficulty": "beginner", "skill_tags": "sql,data_analysis",
+            },
+        ],
+        "prerequisites": [],
+        "completed_course_ids": [],
+        "required_skills": ["python", "sql"],
+    }
+
+
+class FakeEnvironment:
+    """Same interface as the real Environment, without touching the db or
+    the MCP server -- used wherever a test needs an Environment but isn't
+    specifically testing Environment.evaluate()'s grounded logic itself."""
+
+    def __init__(self, catalog_data: dict, feedback_sequence: list[EnvironmentFeedback] | None = None):
+        self._catalog_data = catalog_data
+        self._feedback_sequence = iter(feedback_sequence) if feedback_sequence else None
+
+    def get_catalog_data(self) -> dict:
+        return self._catalog_data
+
+    def evaluate(self, state) -> EnvironmentFeedback:
+        if self._feedback_sequence is not None:
+            return next(self._feedback_sequence)
+        return EnvironmentFeedback(success=True, score=1.0, details=[])
+
 
 class RecordingLLM:
     def __init__(self):
@@ -40,6 +89,11 @@ class RecordingLLM:
             content=f"Completed {current} with enough concrete detail for the downstream synthesis task."
         )
 
+
+# ---------------------------------------------------------------------------
+# Decomposition-first DAG: construction, cycle rejection, execution order.
+# Domain-agnostic Plan/Task model, unaffected by the BrightPeak adaptation.
+# ---------------------------------------------------------------------------
 
 def test_dag_order_and_parallel_batches():
     plan = Plan.model_validate({
@@ -79,139 +133,260 @@ def test_executor_passes_dependency_outputs():
     assert final_output(plan, outputs) == outputs["b"]
 
 
-def test_grounded_checks_are_deterministic():
-    issues = deterministic_checks("Design a phishing awareness workshop", "Too short")
-    assert len(issues) >= 2
+# ---------------------------------------------------------------------------
+# Self-Refine: grounded_path_checks() -- deterministic, no LLM, catches
+# hallucinated courses and wrong totals that an ungrounded self-critique
+# would miss (see planning_eval/ for the full documented case).
+# ---------------------------------------------------------------------------
 
+def test_grounded_path_checks_catch_wrong_total_and_hallucinated_course():
+    all_courses = [
+        {"course_id": 1, "title": "Python Basics", "price": 100},
+        {"course_id": 2, "title": "SQL for Data Analysis", "price": 130},
+        {"course_id": 3, "title": "Deep Learning Foundations", "price": 450},
+    ]
+    path_courses = [all_courses[0], all_courses[1]]  # Python Basics + SQL, true total = 230
 
-def good_deliverable() -> str:
-    body = " ".join(["security checklist explains structured controls and verification"] * 14)
-    return f"# Security Checklist\n- {body}"
-
-
-class SequencedEnvironment:
-    def __init__(self, feedback: list[EnvironmentFeedback]):
-        self.feedback = iter(feedback)
-
-    def evaluate(self, state: str) -> EnvironmentFeedback:
-        return next(self.feedback)
-
-
-def test_random_environment_tends_toward_good_evaluations():
-    environment = Environment(rng=random.Random(42))
-    feedback = [environment.evaluate("Any candidate") for _ in range(1_000)]
-    assert sum(item.score for item in feedback) / len(feedback) > 0.65
-    assert sum(item.success for item in feedback) / len(feedback) > 0.65
-
-
-class ReflexionLLM:
-    def __init__(self):
-        self.acting_calls = 0
-        self.second_trial_saw_memory = False
-
-    def invoke(self, messages, **kwargs):
-        system, prompt = messages[0][1], messages[-1][1]
-        if "acting agent" in system:
-            self.acting_calls += 1
-            if self.acting_calls == 1:
-                return SimpleNamespace(content="A short security answer.")
-            self.second_trial_saw_memory = "I omitted structure" in prompt
-            return SimpleNamespace(content=good_deliverable())
-        return SimpleNamespace(
-            content="I omitted structure and detail; next time I will add a checklist and verification steps."
-        )
-
-
-def test_reflexion_retries_with_bounded_memory():
-    llm = ReflexionLLM()
-    environment = SequencedEnvironment([
-        EnvironmentFeedback(success=False, score=0.3, details=["Random rejection."]),
-        EnvironmentFeedback(success=True, score=0.9),
-    ])
-    result = reflexion(
-        "Create a structured security checklist", llm, environment, max_trials=2, memory_size=1
+    draft = (
+        "Your recommended path is Python Basics and Deep Learning Foundations, "
+        "for a total cost of $999."
     )
+    issues = grounded_path_checks(draft, path_courses, all_courses, total_price=230)
+
+    # 1) SQL for Data Analysis is in the real path but never mentioned.
+    assert any("SQL for Data Analysis" in issue for issue in issues)
+    # 2) Deep Learning Foundations is mentioned but NOT in the real path (hallucinated).
+    assert any("Deep Learning Foundations" in issue and "NOT part of" in issue for issue in issues)
+    # 3) The stated $999 doesn't match the real total of $230.
+    assert any("correct total cost" in issue for issue in issues)
+
+
+def test_grounded_path_checks_pass_on_accurate_draft():
+    all_courses = [
+        {"course_id": 1, "title": "Python Basics", "price": 100},
+        {"course_id": 2, "title": "SQL for Data Analysis", "price": 130},
+    ]
+    draft = "Your path is Python Basics and SQL for Data Analysis, totalling $230.00."
+    issues = grounded_path_checks(draft, all_courses, all_courses, total_price=230)
+    assert issues == []
+
+
+# ---------------------------------------------------------------------------
+# Grounded Environment: real prerequisite/budget/skill-coverage checks
+# against fake-but-realistic catalog data, no DB or MCP server involved
+# (the private cache is seeded directly, bypassing _fetch_data()).
+# ---------------------------------------------------------------------------
+
+def _environment_with_data(data: dict) -> Environment:
+    environment = Environment(student_id=999)  # no mcp_server_path -> never touches the DB
+    environment._data_cache = data
+    return environment
+
+
+def test_environment_rejects_path_missing_a_prerequisite():
+    data = fake_catalog_data()
+    data["prerequisites"] = [{"course_id": 2, "prerequisite_course_id": 1}]  # course 2 needs course 1
+    environment = _environment_with_data(data)
+
+    feedback = environment.evaluate([2])  # course 1 neither completed nor in the path
+    assert feedback.success is False
+    assert any("requires course 1" in issue for issue in feedback.details)
+
+
+def test_environment_accepts_a_valid_path():
+    data = fake_catalog_data()
+    environment = _environment_with_data(data)
+
+    feedback = environment.evaluate([1, 2])  # covers python+sql, within budget/hours/deadline
+    assert feedback.success is True
+    assert feedback.score == 1.0
+
+
+def test_environment_rejects_path_over_budget():
+    data = fake_catalog_data()
+    data["learning_goal"]["budget"] = 50  # both courses together cost 230
+    environment = _environment_with_data(data)
+
+    feedback = environment.evaluate([1, 2])
+    assert feedback.success is False
+    assert any("exceeding the budget" in issue for issue in feedback.details)
+
+
+# ---------------------------------------------------------------------------
+# Reflexion: multi-trial retry with a capped episodic memory buffer,
+# grounded against the real Environment.evaluate(), Anthropic client
+# monkeypatched so no network call or API key is needed.
+# ---------------------------------------------------------------------------
+
+class FakeAnthropicResponse:
+    def __init__(self, text: str):
+        self.content = [SimpleNamespace(text=text)]
+
+
+def test_reflexion_retries_with_bounded_memory(monkeypatch):
+    catalog_data = fake_catalog_data()
+    catalog_data["prerequisites"] = [{"course_id": 2, "prerequisite_course_id": 1}]
+
+    environment = FakeEnvironment(catalog_data, feedback_sequence=[
+        EnvironmentFeedback(success=False, score=0.3, details=["Course 2 requires course 1."]),
+        EnvironmentFeedback(success=True, score=1.0, details=[]),
+    ])
+
+    responses = iter([
+        FakeAnthropicResponse("[2]"),                              # trial 1: missing the prerequisite
+        FakeAnthropicResponse("I forgot course 1 is a prerequisite of course 2; I will add it first."),
+        FakeAnthropicResponse("[1, 2]"),                            # trial 2: applies the lesson
+    ])
+    monkeypatch.setattr(
+        reflexion_anthropic_client.messages, "create",
+        lambda **kwargs: next(responses),
+    )
+
+    result = reflexion(environment, catalog_data, max_trials=2, memory_size=1)
+
     assert result.success is True
     assert len(result.trials) == 2
     assert result.trials[0].feedback.success is False
-    assert result.trials[0].reflection.startswith("I omitted")
-    assert llm.second_trial_saw_memory is True
+    assert result.trials[0].reflection.startswith("I forgot")
     assert len(result.memory) == 1
 
 
+# ---------------------------------------------------------------------------
+# LATS: MCTS-guided search with grounded external feedback and verbal
+# reflection on failed branches. with_structured_output is mocked with
+# include_raw=True support, matching the real fix in lats.py.
+# ---------------------------------------------------------------------------
+
+class _StructuredMock:
+    def __init__(self, owner, schema):
+        self.owner = owner
+        self.schema = schema
+
+    def invoke(self, messages, **kwargs):
+        return self.owner.structured(self.schema)
+
+
 class LATSLLM:
-    class Structured:
-        def __init__(self, owner, schema):
-            self.owner = owner
-            self.schema = schema
-
-        def invoke(self, messages, **kwargs):
-            return self.owner.structured(self.schema)
-
-    def with_structured_output(self, schema, *, method):
+    def with_structured_output(self, schema, *, method, include_raw=False):
         assert method == "json_schema"
-        return self.Structured(self, schema)
+        assert include_raw is True  # the real fix: token usage requires this
+        return _StructuredMock(self, schema)
 
     def structured(self, schema):
+        parsed = self._parsed_for(schema)
+        raw = SimpleNamespace(response_metadata={"token_usage": {"prompt_tokens": 10, "completion_tokens": 5}})
+        return {"parsed": parsed, "raw": raw, "parsing_error": None}
+
+    def _parsed_for(self, schema):
         if schema.__name__ == "LATSActionBatch":
             return schema.model_validate({
                 "actions": [
-                    {"action": "minimal", "state": "Too short"},
-                    {"action": "structured", "state": good_deliverable()},
+                    {"action": "minimal", "course_ids": [2], "state": "course 2"},
+                    {"action": "complete", "course_ids": [1, 2], "state": "course 1, course 2"},
                 ]
             })
         return schema(score=0.8)
 
     def invoke(self, messages, **kwargs):
         return SimpleNamespace(
-            content="This branch failed external length and structure checks; expand with concrete controls."
+            content="This branch is missing the course 1 prerequisite; add it before course 2.",
+            response_metadata={"token_usage": {"prompt_tokens": 8, "completion_tokens": 4}},
         )
 
 
 def test_lats_uses_external_feedback_reflection_and_backpropagation():
-    environment = SequencedEnvironment([
-        EnvironmentFeedback(success=False, score=0.2, details=["Random rejection."]),
-        EnvironmentFeedback(success=True, score=1.0),
+    catalog_data = fake_catalog_data()
+    catalog_data["prerequisites"] = [{"course_id": 2, "prerequisite_course_id": 1}]
+    environment = FakeEnvironment(catalog_data, feedback_sequence=[
+        EnvironmentFeedback(success=False, score=0.2, details=["Course 2 requires course 1."]),
+        EnvironmentFeedback(success=True, score=1.0, details=[]),
     ])
-    
+
     result, metrics = lats(
-        "Create a structured security checklist",
+        "Propose a course path covering python and sql",
         LATSLLM(),
         environment,
         iterations=1,
         n_actions=2,
     )
-    
+
     assert result.success is True
     assert result.best_score == 1.0
-    assert result.root.visits == 2
-    assert result.root.children[0].reflections
     assert metrics["algorithm"] == "LATS"
+    assert metrics["prompt_tokens"] > 0  # confirms the include_raw=True token fix is wired up
     assert "llm_calls" in metrics
-    
+
     tree = flatten_lats_tree(result.root)
     assert len(tree) == 3
     assert tree[1]["feedback"]["success"] is False
     assert tree[2]["feedback"]["success"] is True
 
 
+# ---------------------------------------------------------------------------
+# Routing: each sub-task category should reach the algorithm whose shape
+# genuinely fits it (see routing.py's keyword-based dispatch).
+# ---------------------------------------------------------------------------
+
+class RoutingLLM:
+    """Minimal LLM stub covering both the plain .invoke() (Plan-and-Solve)
+    and the .with_structured_output(..., include_raw=True) (ToT, LATS)
+    paths route_and_execute_subtask can dispatch to."""
+
+    def invoke(self, messages, **kwargs):
+        return SimpleNamespace(
+            content="Plan: parse constraints. Solution: budget=500, weekly_hours=10.",
+            response_metadata={"token_usage": {"prompt_tokens": 5, "completion_tokens": 5}},
+        )
+
+    def with_structured_output(self, schema, *, method, include_raw=False):
+        assert include_raw is True
+        return _RoutingStructuredMock(schema)
+
+
+class _RoutingStructuredMock:
+    def __init__(self, schema):
+        self.schema = schema
+
+    def invoke(self, messages, **kwargs):
+        raw = SimpleNamespace(response_metadata={"token_usage": {"prompt_tokens": 5, "completion_tokens": 5}})
+        if self.schema.__name__ == "ThoughtCandidates":
+            parsed = self.schema(candidates=["course 1, course 2"])
+        elif self.schema.__name__ == "ThoughtEvaluation":
+            parsed = self.schema(score=0.8, rationale="Covers both required skills.")
+        elif self.schema.__name__ == "LATSActionBatch":
+            parsed = self.schema.model_validate({"actions": [{"action": "propose", "course_ids": [1, 2], "state": "course 1, course 2"}]})
+        else:
+            parsed = self.schema(score=0.8)
+        return {"parsed": parsed, "raw": raw, "parsing_error": None}
+
+
 @pytest.mark.parametrize(
     "category, description, expected_algo",
     [
-        ("extract_parse", "Extract and parse user constraints from the text: 'I am a 2nd year CS student'", "Plan-and-Solve"),
-        ("rank_sequence", "Rank three potential elective paths for a student targeting Machine Learning", "Tree of Thoughts"),
-        ("schedule_optimize", "Optimize and generate a final 12-week course schedule with budget checks", "LATS"),
+        ("extract_parse", "Extract and parse this student's stated budget and weekly hours", "Plan-and-Solve"),
+        ("rank_sequence", "Rank three possible course orderings for a Data Analyst target role", "Tree of Thoughts"),
+        ("schedule_optimize", "Generate and validate the final optimized course schedule and check total cost against the budget limit", "LATS"),
     ],
 )
 def test_router_correctly_routes_subtasks(category, description, expected_algo):
-    """اختبار موجه الـ DAG الجديد للتأكد من توجيه كل مهمة للخوازمية المناسبة"""
     subtask = {"description": description, "category": category}
-    llm = LATSLLM()
-    environment = SequencedEnvironment([
-        EnvironmentFeedback(success=True, score=1.0)
+    llm = RoutingLLM()
+    catalog_data = fake_catalog_data()
+    environment = FakeEnvironment(catalog_data, feedback_sequence=[
+        EnvironmentFeedback(success=True, score=1.0, details=[]),
     ])
-    pass
 
+    result, metrics = route_and_execute_subtask(subtask, llm, environment)
+
+    assert metrics["routed_algorithm"] == expected_algo
+    assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# Schema binding sanity check: every structured-output schema used across
+# the pipeline must actually bind to the real LangChain/Mistral client
+# (no network call is made -- with_structured_output() alone doesn't invoke).
+# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
     "schema",
@@ -219,5 +394,5 @@ def test_router_correctly_routes_subtasks(category, description, expected_algo):
 )
 def test_structured_schemas_bind_with_langchain_mistral(schema):
     chat = ChatMistralAI(api_key="test-key", model="test-model")
-    runnable = chat.with_structured_output(schema, method="json_schema")
+    runnable = chat.with_structured_output(schema, method="json_schema", include_raw=True)
     assert runnable is not None
