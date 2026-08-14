@@ -52,7 +52,7 @@ def run_learning_path_request(student_id: int, goal: str, llm, mode: str = "dag"
         # Self-Refine pass on the synthesis task's output specifically --
         # not on the whole plan -- since that's the sub-task type this
         # algorithm is routed to (see self_refine.py's module docstring).
-        refinement = refine_synthesis_output(goal, raw_result, environment)
+        refinement = refine_synthesis_output(goal, raw_result, environment, llm)
         result = refinement.revised
 
         payload.update(
