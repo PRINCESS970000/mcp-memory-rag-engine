@@ -31,6 +31,18 @@ class ValueEstimate(BaseModel):
     score: float = Field(ge=0.0, le=1.0)
 
 
+def _extract_token_usage(raw_message) -> Tuple[int, int]:
+    """Same fix as tree_of_thoughts.py: with_structured_output(...).invoke()
+    returns only the parsed pydantic object (no response_metadata) unless
+    include_raw=True is passed, which returns {"raw": AIMessage, "parsed": ...}.
+    Without this, token counts silently stayed at 0 for every LATS call."""
+    if raw_message is None:
+        return 0, 0
+    metadata = getattr(raw_message, "response_metadata", None) or {}
+    usage = metadata.get("token_usage", {})
+    return usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+
+
 @dataclass
 class LATSNode:
     state: str
@@ -138,17 +150,18 @@ Propose exactly {n_actions} distinct complete candidate learning path schedule(s
 contain a complete learning path plan with course order, total cost, and weekly hours, without placeholders."""),
         ]
 
-        proposed = llm.with_structured_output(
+        proposed_result = llm.with_structured_output(
             LATSActionBatch,
             method="json_schema",
+            include_raw=True,
         ).invoke(action_prompt, temperature=0.5)
-        
+        proposed = proposed_result["parsed"]
+
         total_llm_calls += 1
 
-        if hasattr(proposed, "response_metadata") and "token_usage" in proposed.response_metadata:
-            usage = proposed.response_metadata["token_usage"]
-            total_prompt_tokens += usage.get("prompt_tokens", 0)
-            total_completion_tokens += usage.get("completion_tokens", 0)
+        prompt_tok, completion_tok = _extract_token_usage(proposed_result["raw"])
+        total_prompt_tokens += prompt_tok
+        total_completion_tokens += completion_tok
 
         for item in proposed.actions[:n_actions]:
             child = LATSNode(state=item.state.strip(), action=item.action, parent=leaf)
@@ -170,17 +183,18 @@ External feedback: {feedback.details}
 Estimate the candidate's future usefulness for the student's career goal."""),
             ]
 
-            value_judgment = llm.with_structured_output(
+            value_result = llm.with_structured_output(
                 ValueEstimate,
                 method="json_schema",
+                include_raw=True,
             ).invoke(value_prompt, temperature=0.1)
-            
+            value_judgment = value_result["parsed"]
+
             total_llm_calls += 1
 
-            if hasattr(value_judgment, "response_metadata") and "token_usage" in value_judgment.response_metadata:
-                usage = value_judgment.response_metadata["token_usage"]
-                total_prompt_tokens += usage.get("prompt_tokens", 0)
-                total_completion_tokens += usage.get("completion_tokens", 0)
+            prompt_tok, completion_tok = _extract_token_usage(value_result["raw"])
+            total_prompt_tokens += prompt_tok
+            total_completion_tokens += completion_tok
 
             child.model_score = value_judgment.score
             
