@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import networkx as nx
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict
 
@@ -127,9 +128,11 @@ def execute_plan(plan: Plan, llm: BaseChatModel, environment: Environment, max_w
         routed_tasks: dict[str, str] = {}   # task_id -> context, resolved via PS/ToT/LATS
         for task_id in batch:
             task = plan.task(task_id)
+            ancestors = nx.ancestors(plan.graph, task_id)  # every upstream task, not just depends_on
+            ordered_ancestors = [node for node in plan.topological_order() if node in ancestors]
             context = "\n\n".join(
-                f"OUTPUT FROM {dependency}:\n{outputs[dependency]}"
-                for dependency in task.depends_on
+                f"OUTPUT FROM {ancestor}:\n{outputs[ancestor]}"
+                for ancestor in ordered_ancestors
             ) or "No prerequisite outputs."
 
             if task.expected_tool:

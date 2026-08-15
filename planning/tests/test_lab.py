@@ -1,14 +1,14 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
 from types import SimpleNamespace
 
 import pytest
 
-from planning_lab.algorithms import (
+from planning.algorithms import (
     Environment,
     grounded_path_checks,
     execute_plan,
@@ -17,13 +17,12 @@ from planning_lab.algorithms import (
     lats,
     reflexion,
 )
-from planning_lab.algorithms.reflexion import client as reflexion_anthropic_client
-from planning_lab.models import EnvironmentFeedback, Plan
-from planning_lab.algorithms.decomposition import GeneratedPlan
-from planning_lab.algorithms.dynamic_decomposition import DynamicDecision
-from planning_lab.algorithms.lats import LATSActionBatch, ValueEstimate
-from planning_lab.algorithms.tree_of_thoughts import ThoughtCandidates, ThoughtEvaluation
-from planning_lab.algorithms.routing import route_and_execute_subtask
+from planning.models import EnvironmentFeedback, Plan
+from planning.algorithms.decomposition import GeneratedPlan
+from planning.algorithms.dynamic_decomposition import DynamicDecision
+from planning.algorithms.lats import LATSActionBatch, ValueEstimate
+from planning.algorithms.tree_of_thoughts import ThoughtCandidates, ThoughtEvaluation
+from planning.algorithms.routing import route_and_execute_subtask
 from langchain_mistralai import ChatMistralAI
 
 
@@ -80,14 +79,9 @@ class RecordingLLM:
         self.prompts = []
 
     def invoke(self, messages, **kwargs):
-        prompt = messages[-1][1]
-        self.prompts.append(prompt)
-        current = next(
-            line.strip() for line in prompt.splitlines() if line.strip().startswith("Current task:")
-        )
-        return SimpleNamespace(
-            content=f"Completed {current} with enough concrete detail for the downstream synthesis task."
-        )
+        human_prompt = messages[-1][1]
+        self.prompts.append(human_prompt)
+        return SimpleNamespace(content=f"MARKER_OUTPUT_{len(self.prompts)}")
 
 
 # ---------------------------------------------------------------------------
@@ -123,14 +117,18 @@ def test_executor_passes_dependency_outputs():
     plan = Plan.model_validate({
         "goal": "Create a concise combined report",
         "tasks": [
-            {"id": "a", "instruction": "Collect useful evidence", "depends_on": []},
-            {"id": "b", "instruction": "Synthesize all evidence", "depends_on": ["a"]},
+            {"id": "a", "instruction": "Collect useful evidence", "depends_on": [], "category": "deterministic_parsing"},
+            {"id": "b", "instruction": "Synthesize all evidence", "depends_on": ["a"], "category": "deterministic_parsing"},
         ],
     })
     llm = RecordingLLM()
-    outputs = execute_plan(plan, llm)
-    assert "Completed Current task: Collect useful evidence" in llm.prompts[1]
+    environment = FakeEnvironment(fake_catalog_data())
+    outputs, metrics_by_task = execute_plan(plan, llm, environment)
+
+    assert "MARKER_OUTPUT_1" in llm.prompts[1]  # task b's context embeds task a's output
     assert final_output(plan, outputs) == outputs["b"]
+    assert metrics_by_task["a"]["routed_algorithm"] == "Plan-and-Solve"
+    assert metrics_by_task["b"]["routed_algorithm"] == "Plan-and-Solve"
 
 
 # ---------------------------------------------------------------------------
@@ -214,16 +212,26 @@ def test_environment_rejects_path_over_budget():
 
 # ---------------------------------------------------------------------------
 # Reflexion: multi-trial retry with a capped episodic memory buffer,
-# grounded against the real Environment.evaluate(), Anthropic client
-# monkeypatched so no network call or API key is needed.
+# grounded against the real Environment.evaluate(). llm.invoke() mocked
+# directly (matching the BaseChatModel convention every algorithm in this
+# package now shares) -- no network call or API key needed.
 # ---------------------------------------------------------------------------
 
-class FakeAnthropicResponse:
-    def __init__(self, text: str):
-        self.content = [SimpleNamespace(text=text)]
+class SequencedLLM:
+    """Returns each response in order on successive .invoke() calls,
+    matching langchain's AIMessage shape (content + response_metadata)."""
+
+    def __init__(self, contents: list[str]):
+        self._responses = iter(contents)
+
+    def invoke(self, messages, **kwargs):
+        return SimpleNamespace(
+            content=next(self._responses),
+            response_metadata={"token_usage": {"prompt_tokens": 5, "completion_tokens": 5}},
+        )
 
 
-def test_reflexion_retries_with_bounded_memory(monkeypatch):
+def test_reflexion_retries_with_bounded_memory():
     catalog_data = fake_catalog_data()
     catalog_data["prerequisites"] = [{"course_id": 2, "prerequisite_course_id": 1}]
 
@@ -232,17 +240,13 @@ def test_reflexion_retries_with_bounded_memory(monkeypatch):
         EnvironmentFeedback(success=True, score=1.0, details=[]),
     ])
 
-    responses = iter([
-        FakeAnthropicResponse("[2]"),                              # trial 1: missing the prerequisite
-        FakeAnthropicResponse("I forgot course 1 is a prerequisite of course 2; I will add it first."),
-        FakeAnthropicResponse("[1, 2]"),                            # trial 2: applies the lesson
+    llm = SequencedLLM([
+        "[2]",                                                            # trial 1: missing the prerequisite
+        "I forgot course 1 is a prerequisite of course 2; I will add it first.",
+        "[1, 2]",                                                         # trial 2: applies the lesson
     ])
-    monkeypatch.setattr(
-        reflexion_anthropic_client.messages, "create",
-        lambda **kwargs: next(responses),
-    )
 
-    result = reflexion(environment, catalog_data, max_trials=2, memory_size=1)
+    result = reflexion(environment, catalog_data, llm, max_trials=2, memory_size=1)
 
     assert result.success is True
     assert len(result.trials) == 2

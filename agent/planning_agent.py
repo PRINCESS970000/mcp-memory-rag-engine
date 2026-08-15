@@ -6,6 +6,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Must run before importing `planning` below: when this file is executed
+# directly (`python agent/planning_agent.py`), sys.path[0] is agent/'s own
+# directory, not the repo root, so `import planning` fails with
+# ModuleNotFoundError unless the repo root is added first.
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
 from dotenv import load_dotenv
 from langchain_mistralai import ChatMistralAI
 
@@ -17,8 +24,6 @@ from planning.algorithms import (
 )
 from planning.algorithms.environment import Environment
 from planning.algorithms.self_refine import refine_synthesis_output
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def save_artifact(payload: dict) -> Path:

@@ -105,10 +105,10 @@ def main() -> None:
     elif args.mode == "reflexion":
         # Grounded: real student, real catalog/prerequisites/budget from
         # db/brightpeak.db via mcp_server's get_path_planning_data tool.
-        mcp_server_path = str((ROOT.parent / "mcp_server").resolve())
+        mcp_server_path = str((ROOT / "mcp_server").resolve())
         environment = Environment(args.student_id, mcp_server_path=mcp_server_path)
         catalog_data = environment.get_catalog_data()
-        outcome = reflexion(environment, catalog_data, args.max_trials, args.memory_size)
+        outcome = reflexion(environment, catalog_data, llm, args.max_trials, args.memory_size)
         result = str(outcome.best_course_ids)
         payload.update(
             student_id=args.student_id,
@@ -124,9 +124,10 @@ def main() -> None:
             ],
             memory=outcome.memory,
             result=result,
+            metrics=outcome.metrics,
         )
     else:
-        mcp_server_path = str((ROOT.parent / "mcp_server").resolve())
+        mcp_server_path = str((ROOT / "mcp_server").resolve())
         environment = Environment(args.student_id, mcp_server_path=mcp_server_path)
         outcome, metrics = lats(args.goal, llm, environment, args.iterations, args.n_actions)
         result = outcome.output
