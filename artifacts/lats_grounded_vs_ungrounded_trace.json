@@ -1,0 +1,56 @@
+{
+  "case_id": "hoda_many_valid_orderings",
+  "student_id": 6,
+  "task": "Propose a complete, final course path for student_id=6 to become a ML Engineer. This is the final committed proposal -- it will be checked against real budget, weekly-hour, prerequisite, skill-coverage, and deadline constraints.",
+  "grounded": {
+    "success": false,
+    "output": "Student has completed Python Programming Basics (ID: 6) and Statistics for Data Science (ID: 7). Skills acquired: programming, python, statistics. Total cost: $280.00. Weekly hours: 5 + 6 = 11 hours (within 15-hour limit).",
+    "best_score": 0.8333,
+    "iterations": 2,
+    "metrics": {
+      "algorithm": "LATS",
+      "task_type": "schedule_optimization_and_validation",
+      "llm_calls": 10,
+      "prompt_tokens": 6282,
+      "completion_tokens": 3543,
+      "total_tokens": 9825,
+      "latency_seconds": 26.731,
+      "iterations_used": 2,
+      "best_score": 0.8333,
+      "status": "failed"
+    }
+  },
+  "ungrounded": {
+    "success": true,
+    "output": "Completed Python Programming Basics (ID: 6), Introduction to Computer Science (ID: 1), Statistics for Data Science (ID: 7), Database Management Systems (ID: 3), Cloud Computing Fundamentals (ID: 9), and Deep Learning Foundations (ID: 11). Skills acquired: programming, machine_learning, deep_learning, cloud_computing, statistics, python, sql, data_visualization, data_engineering. Total cost: $1630.00 (exceeds budget by $630.00). Weekly hours: 10 + 6 + 6 + 8 + 8 + 10 = 48 hours (exceeds weekly limit of 15 hours).",
+    "best_score": 0.8412,
+    "iterations": 1,
+    "metrics": {
+      "algorithm": "LATS",
+      "task_type": "schedule_optimization_and_validation",
+      "llm_calls": 2,
+      "prompt_tokens": 1721,
+      "completion_tokens": 379,
+      "total_tokens": 2100,
+      "latency_seconds": 3.407,
+      "iterations_used": 1,
+      "best_score": 0.8412,
+      "status": "success"
+    },
+    "real_grounded_check_of_same_output": {
+      "success": false,
+      "score": 0.5,
+      "details": [
+        "Path costs 1930.00, exceeding the budget of 1000.00.",
+        "Course 6 ('Python Programming Basics') overlaps with others totalling 25.0 weekly hours, exceeding 15.0 available.",
+        "Course 1 ('Introduction to Computer Science') overlaps with others totalling 38.0 weekly hours, exceeding 15.0 available.",
+        "Course 7 ('Statistics for Data Science') overlaps with others totalling 25.0 weekly hours, exceeding 15.0 available.",
+        "Course 3 ('Database Management Systems') overlaps with others totalling 38.0 weekly hours, exceeding 15.0 available.",
+        "Course 9 ('Cloud Computing Fundamentals') overlaps with others totalling 36.0 weekly hours, exceeding 15.0 available.",
+        "Course 10 ('Data Engineering Pipelines') overlaps with others totalling 22.0 weekly hours, exceeding 15.0 available.",
+        "Course 8 ('Data Visualization with Python') overlaps with others totalling 36.0 weekly hours, exceeding 15.0 available.",
+        "Course 3 starts 2026-09-01, before its prerequisite 1 ends (2026-10-13)."
+      ]
+    }
+  }
+}

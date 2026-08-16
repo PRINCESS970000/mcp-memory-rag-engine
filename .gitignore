@@ -8,3 +8,4 @@ venv/
 *.log
 rag/chroma_db/
 chroma_db/
+*.db
