@@ -4,35 +4,35 @@
   "task": "Propose a complete, final course path for student_id=6 to become a ML Engineer. This is the final committed proposal -- it will be checked against real budget, weekly-hour, prerequisite, skill-coverage, and deadline constraints.",
   "grounded": {
     "success": false,
-    "output": "Student has completed Python Programming Basics (ID: 6) and Statistics for Data Science (ID: 7). Skills acquired: programming, python, statistics. Total cost: $280.00. Weekly hours: 5 + 6 = 11 hours (within 15-hour limit).",
-    "best_score": 0.8333,
+    "output": "Completed: Python Programming Basics (6), Introduction to Computer Science (1). In progress: Statistics for Data Science (7), Software Engineering Principles (4), Database Management Systems (3). Pending: Advanced Machine Learning (2), Data Engineering Pipelines (10), Cloud Computing Fundamentals (9), Deep Learning Foundations (11).",
+    "best_score": 0.5,
     "iterations": 2,
     "metrics": {
       "algorithm": "LATS",
       "task_type": "schedule_optimization_and_validation",
       "llm_calls": 10,
-      "prompt_tokens": 6282,
-      "completion_tokens": 3543,
-      "total_tokens": 9825,
-      "latency_seconds": 26.731,
+      "prompt_tokens": 7707,
+      "completion_tokens": 5142,
+      "total_tokens": 12849,
+      "latency_seconds": 47.608,
       "iterations_used": 2,
-      "best_score": 0.8333,
+      "best_score": 0.5,
       "status": "failed"
     }
   },
   "ungrounded": {
     "success": true,
-    "output": "Completed Python Programming Basics (ID: 6), Introduction to Computer Science (ID: 1), Statistics for Data Science (ID: 7), Database Management Systems (ID: 3), Cloud Computing Fundamentals (ID: 9), and Deep Learning Foundations (ID: 11). Skills acquired: programming, machine_learning, deep_learning, cloud_computing, statistics, python, sql, data_visualization, data_engineering. Total cost: $1630.00 (exceeds budget by $630.00). Weekly hours: 10 + 6 + 6 + 8 + 8 + 10 = 48 hours (exceeds weekly limit of 15 hours).",
+    "output": "Completed: Python Programming Basics (ID: 6), Statistics for Data Science (ID: 7), Cloud Computing Fundamentals (ID: 9), Deep Learning Foundations (ID: 11). Skills: programming, machine_learning, deep_learning, cloud_computing, statistics. Total cost: $1000.0. Weekly hours: 10+6+8+10=34 (exceeds 15-hour weekly limit - invalid path).",
     "best_score": 0.8412,
     "iterations": 1,
     "metrics": {
       "algorithm": "LATS",
       "task_type": "schedule_optimization_and_validation",
       "llm_calls": 2,
-      "prompt_tokens": 1721,
-      "completion_tokens": 379,
-      "total_tokens": 2100,
-      "latency_seconds": 3.407,
+      "prompt_tokens": 1659,
+      "completion_tokens": 382,
+      "total_tokens": 2041,
+      "latency_seconds": 5.297,
       "iterations_used": 1,
       "best_score": 0.8412,
       "status": "success"
@@ -41,15 +41,12 @@
       "success": false,
       "score": 0.5,
       "details": [
-        "Path costs 1930.00, exceeding the budget of 1000.00.",
-        "Course 6 ('Python Programming Basics') overlaps with others totalling 25.0 weekly hours, exceeding 15.0 available.",
-        "Course 1 ('Introduction to Computer Science') overlaps with others totalling 38.0 weekly hours, exceeding 15.0 available.",
-        "Course 7 ('Statistics for Data Science') overlaps with others totalling 25.0 weekly hours, exceeding 15.0 available.",
-        "Course 3 ('Database Management Systems') overlaps with others totalling 38.0 weekly hours, exceeding 15.0 available.",
-        "Course 9 ('Cloud Computing Fundamentals') overlaps with others totalling 36.0 weekly hours, exceeding 15.0 available.",
+        "Course 9 requires course 1, which is neither completed nor included in the path.",
+        "Course 10 requires course 3, which is neither completed nor included in the path.",
+        "Path costs 1530.00, exceeding the budget of 1000.00.",
+        "Course 9 ('Cloud Computing Fundamentals') overlaps with others totalling 22.0 weekly hours, exceeding 15.0 available.",
         "Course 10 ('Data Engineering Pipelines') overlaps with others totalling 22.0 weekly hours, exceeding 15.0 available.",
-        "Course 8 ('Data Visualization with Python') overlaps with others totalling 36.0 weekly hours, exceeding 15.0 available.",
-        "Course 3 starts 2026-09-01, before its prerequisite 1 ends (2026-10-13)."
+        "Course 8 ('Data Visualization with Python') overlaps with others totalling 22.0 weekly hours, exceeding 15.0 available."
       ]
     }
   }
