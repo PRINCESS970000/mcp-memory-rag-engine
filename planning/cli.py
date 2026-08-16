@@ -82,11 +82,29 @@ def main() -> None:
     payload: dict = {"mode": args.mode, "model": args.model, "goal": args.goal}
 
     if args.mode == "dag":
+        # Grounded: same real student/catalog Environment as --mode
+        # reflexion/lats below, so the synthesis task's Self-Refine pass
+        # (refine_synthesis_output) checks claims against real data too.
+        mcp_server_path = str((ROOT / "mcp_server").resolve())
+        environment = Environment(args.student_id, mcp_server_path=mcp_server_path)
         plan = decompose_goal(args.goal, llm)
         print("Execution batches:", plan.execution_batches())
-        outputs = execute_plan(plan, llm)
-        result = final_output(plan, outputs)
-        payload.update(plan=plan.model_dump(), outputs=outputs, result=result)
+        outputs, metrics_by_task = execute_plan(plan, llm, environment=environment)
+        raw_result = final_output(plan, outputs)
+
+        from .algorithms.self_refine import refine_synthesis_output
+        refinement = refine_synthesis_output(args.goal, raw_result, environment, llm)
+        result = refinement.revised
+
+        payload.update(
+            student_id=args.student_id,
+            plan=plan.model_dump(),
+            outputs=outputs,
+            metrics_by_task=metrics_by_task,
+            raw_synthesis_output=raw_result,
+            self_refine_grounded_issues=refinement.grounded_issues,
+            result=result,
+        )
     elif args.mode == "dynamic":
         history = dynamic_decomposition(args.goal, llm)
         result = history[-1][1] if history else "Planner reported the goal was already complete."
