@@ -169,6 +169,33 @@ def test_grounded_path_checks_pass_on_accurate_draft():
     assert issues == []
 
 
+def test_grounded_path_checks_do_not_flag_already_completed_courses_as_hallucinated():
+    """Regression test: a course the student already completed/enrolled in
+    and that's mentioned purely as background context must not be flagged
+    as 'hallucinated' just because it isn't part of the new recommended
+    path -- this false positive is what previously sent the revision step
+    spiraling into inventing several unrelated extra courses to try to
+    'fix' something that was never actually wrong."""
+    all_courses = [
+        {"course_id": 1, "title": "Introduction to Computer Science", "price": 150},
+        {"course_id": 2, "title": "Advanced Machine Learning", "price": 400},
+        {"course_id": 3, "title": "Database Management Systems", "price": 250},
+        {"course_id": 4, "title": "Software Engineering Principles", "price": 200},
+    ]
+    path_courses = [all_courses[3]]  # only Software Engineering Principles is newly recommended
+    draft = (
+        "Omar has completed Introduction to Computer Science and Database Management "
+        "Systems, and is enrolled in Advanced Machine Learning. We recommend Software "
+        "Engineering Principles next, for a total of $200.00."
+    )
+
+    issues = grounded_path_checks(
+        draft, path_courses, all_courses, total_price=200,
+        already_known_course_ids={1, 2, 3},
+    )
+    assert issues == []
+
+
 # ---------------------------------------------------------------------------
 # Grounded Environment: real prerequisite/budget/skill-coverage checks
 # against fake-but-realistic catalog data, no DB or MCP server involved

@@ -40,10 +40,24 @@ from dataclasses import dataclass
 from langchain_core.language_models.chat_models import BaseChatModel
 
 
-def grounded_path_checks(draft: str, path_courses: list[dict], all_courses: list[dict], total_price: float) -> list[str]:
+def grounded_path_checks(
+    draft: str,
+    path_courses: list[dict],
+    all_courses: list[dict],
+    total_price: float,
+    already_known_course_ids: set[int] = frozenset(),
+) -> list[str]:
     """Check the draft's factual claims against real course data -- the
     same `courses` records environment.py's evaluate() checks the path
-    against. No LLM call, no opinion, just string/number matching."""
+    against. No LLM call, no opinion, just string/number matching.
+
+    already_known_course_ids: courses the student has already completed or
+    is currently enrolled in. These are legitimately mentioned as
+    background context (e.g. "Omar has already completed Intro to CS") and
+    must NOT be flagged as hallucinated just because they aren't part of
+    the newly recommended path -- only a course that is neither the
+    recommended path nor something the student already has on record is a
+    real hallucination."""
     issues: list[str] = []
     draft_lower = draft.lower()
 
@@ -56,7 +70,11 @@ def grounded_path_checks(draft: str, path_courses: list[dict], all_courses: list
 
     path_ids = {c["course_id"] for c in path_courses}
     for course in all_courses:
-        if course["course_id"] not in path_ids and course["title"].lower() in draft_lower:
+        if (
+            course["course_id"] not in path_ids
+            and course["course_id"] not in already_known_course_ids
+            and course["title"].lower() in draft_lower
+        ):
             issues.append(
                 f"Draft mentions '{course['title']}', which is NOT part of "
                 f"the recommended path -- likely a hallucinated course."
@@ -119,8 +137,9 @@ def reflect_and_refine(
     all_courses: list[dict],
     total_price: float,
     llm: BaseChatModel,
+    already_known_course_ids: set[int] = frozenset(),
 ) -> ReflectionResult:
-    grounded = grounded_path_checks(draft, path_courses, all_courses, total_price)
+    grounded = grounded_path_checks(draft, path_courses, all_courses, total_price, already_known_course_ids)
     grounded_report = "\n".join(f"- {issue}" for issue in grounded) or "- Grounded checks passed."
 
     metrics = {"algorithm": "Self-Refine", "llm_calls": 0, "prompt_tokens": 0,
@@ -207,5 +226,6 @@ def refine_synthesis_output(goal: str, draft: str, environment, llm: BaseChatMod
     )
     path_courses = [courses_by_id[cid] for cid in course_ids if cid in courses_by_id]
     total_price = sum(c["price"] for c in path_courses)
+    already_known_course_ids = set(data.get("completed_course_ids", [])) | set(data.get("enrolled_course_ids", []))
 
-    return reflect_and_refine(goal, draft, path_courses, all_courses, total_price, llm)
+    return reflect_and_refine(goal, draft, path_courses, all_courses, total_price, llm, already_known_course_ids)
