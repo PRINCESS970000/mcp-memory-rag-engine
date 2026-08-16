@@ -62,10 +62,10 @@ def _format_catalog(courses: list[dict]) -> str:
 
 
 def _parse_course_ids(text: str) -> list[int]:
-    match = re.search(r"\[[\d,\s]*\]", text)
+    match = re.search(r"\[[\d,\s\"']*\]", text)
     if not match:
         raise ValueError(f"Could not find a JSON list of course_ids in model output: {text!r}")
-    return json.loads(match.group(0))
+    return [int(course_id) for course_id in json.loads(match.group(0))]
 
 
 def _invoke(llm: BaseChatModel, system_prompt: str, user_prompt: str) -> tuple[str, dict]:

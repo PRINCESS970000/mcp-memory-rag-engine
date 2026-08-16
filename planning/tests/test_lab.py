@@ -258,6 +258,9 @@ class SequencedLLM:
         )
 
 
+from planning.algorithms.reflexion import _parse_course_ids
+
+
 def test_reflexion_retries_with_bounded_memory():
     catalog_data = fake_catalog_data()
     catalog_data["prerequisites"] = [{"course_id": 2, "prerequisite_course_id": 1}]
@@ -280,6 +283,18 @@ def test_reflexion_retries_with_bounded_memory():
     assert result.trials[0].feedback.success is False
     assert result.trials[0].reflection.startswith("I forgot")
     assert len(result.memory) == 1
+
+
+def test_parse_course_ids_handles_quoted_string_elements():
+    """Regression test: the model sometimes returns a valid JSON list with
+    each course_id as a quoted string (e.g. '["6", "7", "14"]') instead of
+    bare integers. This crashed run_reflexion_vs_selfrefine.py in practice
+    -- the old regex only matched digits/commas/whitespace and rejected
+    any quote character, even though json.loads(...) would have parsed it
+    fine."""
+    assert _parse_course_ids('["6", "7", "14", "4", "3"]') == [6, 7, 14, 4, 3]
+    assert _parse_course_ids("The recommended courses are [6, 7, 14].") == [6, 7, 14]
+    assert all(isinstance(x, int) for x in _parse_course_ids('["6", "7"]'))
 
 
 # ---------------------------------------------------------------------------
