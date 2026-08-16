@@ -172,7 +172,7 @@ Below is the summary of evaluation metrics collected across 9 representative tes
 | Self-Refine (single pass) | 0.17 (1/6 checks) | 1 draft + 1 revision | Fixed nothing meaningfully: still over budget ($1000 vs $500), still 30 weekly hours vs. 8 available, still 2 unmet prerequisites, still misses the deadline. One revision (dropping the last course) can't fix constraints that interact this much. |
 | Reflexion (multi-trial) | 0.50 (3/6 checks) | 3 trials, 6 LLM calls | Each trial's grounded feedback becomes the next trial's explicit strategy ("I'll prioritize prerequisites first... space out high-hour courses...") — genuinely reasons about *why* it failed, not just retries blindly. Still doesn't fully succeed (this catalog's overlapping dates make full success for this student's 8hr/week cap genuinely hard), but reaches 3x Self-Refine's score. |
 
-Full trace: [`planning_eval/artifacts/self_refine_vs_reflexion_trace.json`](planning_eval/artifacts/self_refine_vs_reflexion_trace.json).
+Full trace: [`artifacts/self_refine_vs_reflexion_trace.json`](artifacts/self_refine_vs_reflexion_trace.json).
 Reflexion is what the agent ships with for the "propose a complete path" sub-task; Self-Refine is reserved for the cheap, low-interaction sub-task of writing the student-facing explanation (see `planning/algorithms/self_refine.py`'s module docstring).
 
 #### 5. Decomposition-first vs. dynamic decomposition
@@ -184,7 +184,7 @@ Reflexion is what the agent ships with for the "propose a complete path" sub-tas
 | `kareem_dropped_course` (real `enrollments` row: course_id=1, grade=45.0, status=DROPPED) | decomposition-first | Generic 8-task plan (`verify prerequisites`, `select_courses`) — never specifically addresses the dropped course. |
 | `kareem_dropped_course` | dynamic | After observing the real DROPPED status in step 1, step 4's course search surfaces course_id=1 (the dropped course) as a candidate again — the plan reacts to the failure decomposition-first would have silently ignored. |
 
-Full trace: [`planning_eval/artifacts/decomposition_comparison_trace.json`](planning_eval/artifacts/decomposition_comparison_trace.json).
+Full trace: [`artifacts/decomposition_comparison_trace.json`](artifacts/decomposition_comparison_trace.json).
 Dynamic decomposition ships as the default for the top-level path request; decomposition-first is kept for the fully mechanical sub-tasks with no real branching (e.g. `t2`'s role-requirement lookup).
 
 #### 6. LATS grounded vs. ungrounded `Environment` (`hoda_many_valid_orderings` case)
@@ -194,8 +194,10 @@ Dynamic decomposition ships as the default for the top-level path request; decom
 | Ungrounded (`RandomEnvironment`, the toolkit's original randomized default) | `success: true`, score 0.84, 1 iteration, 2 LLM calls | `success: false`, **score 0.5** — real budget exceeded by $930, weekly hours exceeded 2–3x over (up to 38 vs. the 15hr limit), and a real prerequisite/schedule violation (course 3 starts before its prerequisite, course 1, ends) |
 | Grounded (`Environment`, real MCP/DB checks) | `success: false`, score 0.83, 2 iterations, 10 LLM calls | Same — the score IS the real check, so there's no gap between belief and reality |
 
-Full trace: [`planning_eval/artifacts/lats_grounded_vs_ungrounded_trace.json`](planning_eval/artifacts/lats_grounded_vs_ungrounded_trace.json).
+Full trace: [`artifacts/lats_grounded_vs_ungrounded_trace.json`](artifacts/lats_grounded_vs_ungrounded_trace.json).
 This is the case the grounding requirement exists for: the ungrounded run finished faster and *believed* it had succeeded, but its own proposal would have double-booked the student and blown the budget by 93%. The grounded run costs 5x the LLM calls and never claims success on a genuinely infeasible catalog, which is the correct behavior. LATS ships wired to the real `Environment` for exactly this reason.
+
+**Full demo transcript combining all four comparisons above, plus a real Self-Refine draft→critique→revision on its actual designed sub-task:** [`planning_eval/demo_transcript.md`](planning_eval/demo_transcript.md).
 
 ---
 
