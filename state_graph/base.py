@@ -10,11 +10,9 @@ def get_db_connection():
     return conn
 
 def init_checkpointing_tables():
-    """إنشاء الجداول المشتركة للـ Checkpoints والـ HITL والـ Failure Tickets."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. جدول الحفظ الدائم لـ State Graphs (Checkpointing)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS checkpoints (
             thread_id TEXT,
@@ -25,7 +23,6 @@ def init_checkpointing_tables():
         )
     """)
     
-    # 2. جدول مهام التدخل البشري (HITL Tasks)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS hitl_tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,7 +35,6 @@ def init_checkpointing_tables():
         )
     """)
     
-    # 3. جدول تذاكر الأخطاء والمشاكل غير المتوقعة (Failure Tickets)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS failure_tickets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +51,6 @@ def init_checkpointing_tables():
     conn.close()
 
 def save_checkpoint(thread_id: str, node_name: str, state: Dict[str, Any]):
-    """حفظ أحدث حالة للـ Graph فوراً بعد الانتقال عبر العقدة."""
     init_checkpointing_tables()
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -67,7 +62,6 @@ def save_checkpoint(thread_id: str, node_name: str, state: Dict[str, Any]):
     conn.close()
 
 def load_latest_checkpoint(thread_id: str) -> Optional[Dict[str, Any]]:
-    """استرجاع آخر نقطة حفظ محفوظة لاستئناف التنفيذ من نفس العقدة عند السقوط/إعادة التشغيل."""
     init_checkpointing_tables()
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -83,7 +77,6 @@ def load_latest_checkpoint(thread_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 def create_hitl_task(thread_id: str, reason: str, details: Dict[str, Any]) -> int:
-    """إنشاء مهمة تدخل بشري ينتظر فيها الـ Graph موافقة الأدمن عبر المنصة."""
     init_checkpointing_tables()
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -97,7 +90,6 @@ def create_hitl_task(thread_id: str, reason: str, details: Dict[str, Any]) -> in
     return task_id
 
 def create_failure_ticket(thread_id: str, node_name: str, error_msg: str) -> int:
-    """إنشاء تذكرة خطأ غير متوقع عند فشل استدعاء أداة أو خطأ في الـ Validation."""
     init_checkpointing_tables()
     conn = get_db_connection()
     cursor = conn.cursor()

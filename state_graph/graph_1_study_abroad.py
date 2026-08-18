@@ -3,20 +3,18 @@ import json
 import os
 import sys
 
-# ربط المسار لاستيراد الـ mcp_client
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from client import call_mcp_tool
 
-DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "db", "academy.db"))
+DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "db", "brightpeak.db"))
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-# ======================================================
 # Checkpoint & Infrastructure DB Helpers
-# ======================================================
+
 
 def save_checkpoint(thread_id: str, node_name: str, state: dict):
     conn = get_db_connection()
@@ -90,19 +88,15 @@ def create_failure_ticket(thread_id: str, error_message: str):
     conn.commit()
     conn.close()
 
-# ======================================================
 # Graph Nodes
-# ======================================================
 
 def lats_search_node(state: dict) -> dict:
     """Node 1: LATS Search Workflow using MCP Tools"""
     print(f"--- Running LATS Search Node for Thread {state.get('thread_id')} ---")
     try:
-        # استدعاء أداة الـ MCP لجلب الكورسات/السجل الأكاديمي
         courses_res = call_mcp_tool("list_all_courses")
         courses = courses_res.get("courses", [])
 
-        # خوارزمية LATS لاختيار أفضل برنامج متوافق
         selected_program = "Exchange Program - ETH Zurich"
         requires_grant = True
 
@@ -161,18 +155,16 @@ def hitl_gate_node(state: dict) -> dict:
         save_checkpoint(state["thread_id"], "hitl_gate_node", state)
     return state
 
-# ======================================================
 # Main Execution / Resumption Flow
-# ======================================================
+
 
 def run_or_resume_graph(thread_id: str, student_email: str = "omar.k@brightpeak.edu"):
-    # 1. محاولة التعافي واستئناف أحدث Checkpoint
     checkpoint = get_latest_checkpoint(thread_id)
     if checkpoint:
-        print(f"🔄 Resuming from saved Checkpoint. Current status: {checkpoint.get('status')}")
+        print(f"Resuming from saved Checkpoint. Current status: {checkpoint.get('status')}")
         state = checkpoint
     else:
-        print("🆕 Starting fresh State Graph execution.")
+        print("Starting fresh State Graph execution.")
         state = {
             "thread_id": thread_id,
             "student_email": student_email,
@@ -193,6 +185,5 @@ def run_or_resume_graph(thread_id: str, student_email: str = "omar.k@brightpeak.
 
 
 if __name__ == "__main__":
-    # تشغيل للتجربة
     result = run_or_resume_graph("thread_user_101")
     print("\nFinal State Output:", json.dumps(result, indent=2))
