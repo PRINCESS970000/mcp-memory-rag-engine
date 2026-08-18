@@ -1,15 +1,12 @@
-from fastmcp.client import (
-    Client,
-    PythonStdioTransport,
-    StreamableHttpTransport
-)
-from mcp.types import SamplingCapability
-import asyncio
 import os
+import sys
+import asyncio
 import uuid
+from fastmcp.client import Client, PythonStdioTransport, StreamableHttpTransport
+from mcp.types import SamplingCapability
 
 # ======================================================
-# Path to the MCP Server
+# Config & Paths
 # ======================================================
 
 SERVER_FILE = os.path.abspath(
@@ -20,11 +17,6 @@ SERVER_FILE = os.path.abspath(
         "server.py"
     )
 )
-import sys
-
-# ======================================================
-# Transport Configuration
-# ======================================================
 
 if len(sys.argv) > 1:
     TRANSPORT_TYPE = sys.argv[1].lower()
@@ -32,78 +24,38 @@ else:
     TRANSPORT_TYPE = "stdio"
 
 
-if TRANSPORT_TYPE == "stdio":
-
-    transport = PythonStdioTransport(SERVER_FILE)
-
-elif TRANSPORT_TYPE == "http":
-
-    transport = StreamableHttpTransport(
-        "http://127.0.0.1:8000/mcp"
-    )
-
-else:
-    raise ValueError(
-        "Transport must be either 'stdio' or 'http'."
-    )
+def get_transport(transport_type: str = TRANSPORT_TYPE):
+    if transport_type == "stdio":
+        return PythonStdioTransport(SERVER_FILE)
+    elif transport_type == "http":
+        return StreamableHttpTransport("http://127.0.0.1:8000/mcp")
+    else:
+        raise ValueError("Transport must be either 'stdio' or 'http'.")
 
 
 # ======================================================
-# Progress Handler
+# Handlers
 # ======================================================
 
 async def progress_handler(progress, total, message):
-
     percent = (progress / total) * 100
-
-    print(f"\nProgress: {percent:.0f}%")
-
     if message:
-        print(message)
+        print(f"[MCP Progress {percent:.0f}%] {message}")
 
-
-# ======================================================
-# Sampling Handler
-# ======================================================
 
 async def sampling_handler(messages, params, context):
-
-    print("\n========== Sampling Request ==========\n")
-
-    # `messages` is now the full session history (rolling buffer), not just
-    # a single prompt. messages[0] used to be the whole thing; now it's just
-    # the oldest message kept in the buffer. Print the full conversation so
-    # you can see what the server is actually sending.
-    for m in messages:
-        print(f"[{m.role}] {m.content.text.strip()}")
-
-    print("\n========== Generating Response ==========\n")
-
-    response = """
-Overall Performance:
-Excellent
-
-Strengths:
-- Strong performance in core courses.
-- High grades in completed subjects.
-- Consistent academic achievement.
-
-Weaknesses:
-- One course is still in progress.
-
-Recommendation:
-Continue maintaining the current performance and focus on completing the remaining courses with the same level of excellence.
+    return """
+Overall Performance: Excellent
+Recommendation: Approved for exchange program requirements.
 """
-
-    return response
 
 
 # ======================================================
-# Create Client
+# Main Client Instance
 # ======================================================
 
 client = Client(
-    transport,
+    get_transport(),
     progress_handler=progress_handler,
     sampling_handler=sampling_handler,
     sampling_capabilities=SamplingCapability()
@@ -111,38 +63,62 @@ client = Client(
 
 
 # ======================================================
-# Main Function
+# State Graph Helper Invokers
+# ======================================================
+
+async def call_mcp_tool_async(tool_name: str, arguments: dict = None, transport_type: str = TRANSPORT_TYPE):
+    """استدعاء أداة MCP بشكل Async لاستخدامها داخل الـ State Graph"""
+    if arguments is None:
+        arguments = {}
+
+    transport = get_transport(transport_type)
+    async_client = Client(
+        transport,
+        progress_handler=progress_handler,
+        sampling_handler=sampling_handler,
+        sampling_capabilities=SamplingCapability()
+    )
+
+    async with async_client:
+        result = await async_client.call_tool(tool_name, arguments)
+        return result.data
+
+
+def call_mcp_tool(tool_name: str, arguments: dict = None, transport_type: str = TRANSPORT_TYPE):
+    """استدعاء أداة MCP بشكل Sync لاستخدامها داخل الـ Nodes المباشرة"""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import nest_asyncio
+        nest_asyncio.apply()
+        return asyncio.run(call_mcp_tool_async(tool_name, arguments, transport_type))
+    else:
+        return asyncio.run(call_mcp_tool_async(tool_name, arguments, transport_type))
+
+
+# ======================================================
+# Main Script Execution (Standalone Test)
 # ======================================================
 
 async def main():
-
     async with client:
-
         print("✅ Connected to Brightpeak MCP Server!")
 
-        # ------------------------------------------------
-        # List Tools
-        # ------------------------------------------------
-
+        # 1. List Tools
         tools = await client.list_tools()
-
         print("\n========== Available Tools ==========\n")
-
         for tool in tools:
             print(f"Tool Name: {tool.name}")
             print(f"Description: {tool.description}")
             print("-" * 50)
 
-        # ------------------------------------------------
-        # list_all_courses
-        # ------------------------------------------------
-
+        # 2. list_all_courses
         print("\n========== Calling list_all_courses ==========\n")
-
         result = await client.call_tool("list_all_courses")
-
-        courses = result.data["courses"]
-
+        courses = result.data.get("courses", [])
         for course in courses:
             print(f"Course ID   : {course['course_id']}")
             print(f"Title       : {course['title']}")
@@ -150,39 +126,25 @@ async def main():
             print(f"Credits     : {course['credits']}")
             print("-" * 40)
 
-        # ------------------------------------------------
-        # get_student_profile
-        # ------------------------------------------------
-
+        # 3. get_student_profile
         print("\n========== Calling get_student_profile ==========\n")
-
         result = await client.call_tool(
             "get_student_profile",
-            {
-                "email": "omar.k@brightpeak.edu"
-            }
+            {"email": "omar.k@brightpeak.edu"}
         )
-
-        student = result.data["data"]
-
-        print(f"Name  : {student['name']}")
-        print(f"Email : {student['email']}")
-        print(f"Role  : {student['role']}")
-
+        student = result.data.get("data", {})
+        print(f"Name  : {student.get('name')}")
+        print(f"Email : {student.get('email')}")
+        print(f"Role  : {student.get('role')}")
         print("\nCourses:")
-
-        for course in student["enrolled_courses"]:
+        for course in student.get("enrolled_courses", []):
             print(f"Course : {course['title']}")
             print(f"Grade  : {course['grade']}")
             print(f"Status : {course['status']}")
             print("-" * 30)
 
-        # ------------------------------------------------
-        # update_student_grade
-        # ------------------------------------------------
-
+        # 4. update_student_grade
         print("\n========== Calling update_student_grade ==========\n")
-
         result = await client.call_tool(
             "update_student_grade",
             {
@@ -192,49 +154,26 @@ async def main():
                 "requester_role": "INSTRUCTOR"
             }
         )
-
         print(result.data)
 
-        # ------------------------------------------------
-        # Verify Update
-        # ------------------------------------------------
-
+        # 5. Verify Update
         print("\n========== Verify Updated Student ==========\n")
-
         result = await client.call_tool(
             "get_student_profile",
-            {
-                "email": "youssef.i@brightpeak.edu"
-            }
+            {"email": "youssef.i@brightpeak.edu"}
         )
-
-        student = result.data["data"]
-
-        for course in student["enrolled_courses"]:
+        student = result.data.get("data", {})
+        for course in student.get("enrolled_courses", []):
             print(course)
 
-        # ------------------------------------------------
-        # generate_academic_report
-        # ------------------------------------------------
-
+        # 6. generate_academic_report
         print("\n========== Calling generate_academic_report ==========\n")
-
         result = await client.call_tool("generate_academic_report")
-
         print(result.data)
 
-        # ------------------------------------------------
-        # request_student_evaluation
-        # ------------------------------------------------
-
+        # 7. request_student_evaluation
         print("\n========== Calling request_student_evaluation ==========\n")
-
-        # session_id is now REQUIRED by the server (used to key the rolling
-        # buffer of chat history). Generate one per run, or hardcode a fixed
-        # string if you want repeated runs to keep building on the same
-        # conversation history instead of starting fresh each time.
         session_id = str(uuid.uuid4())
-
         result = await client.call_tool(
             "request_student_evaluation",
             {
@@ -242,9 +181,7 @@ async def main():
                 "session_id": session_id
             }
         )
-
-        evaluation = result.data["evaluation"]
-
+        evaluation = result.data.get("evaluation", "")
         print("\n========== Student Evaluation ==========\n")
         print("=" * 60)
         print("STUDENT EVALUATION")
@@ -252,10 +189,6 @@ async def main():
         print(evaluation.strip())
         print("=" * 60)
 
-
-# ======================================================
-# Run Client
-# ======================================================
 
 if __name__ == "__main__":
     asyncio.run(main())
