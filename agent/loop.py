@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -40,6 +41,8 @@ def handle_message(stm: ShortTermMemory, student_id: int, message: str) -> dict:
         result.update(_handle_policy_question(message))
     elif intent == "memory":
         result.update(_handle_memory_question(student_id, message))
+    elif intent == "planning":
+        result.update(_handle_planning_question(student_id, message))
     else:
         result.update(_handle_db_tool_question(student_id, message))
 
@@ -94,6 +97,35 @@ def _handle_policy_question(question: str) -> dict:
         "retrieval_reasoning_log": reasoning_log,
         "retrieved_chunk_ids": [c.chunk_id for c, _score in retrieved],
     }
+
+def _handle_planning_question(student_id: int, message: str) -> dict:
+    """
+    Routes to the new Adaptive Learning Path Planning agent (agent/
+    planning_agent.py) -- a separate agent reusing the same mcp_server/
+    and db/, not a modification of the memory/RAG agent's own code path.
+    Uses decomposition-first ("dag") mode by default; dynamic mode is
+    available via planning_agent.py's own CLI for the comparison table
+    in planning_eval/, not exposed through this chat entry point.
+    """
+    sys.path.insert(0, str(Path(__file__).parent.parent / "planning"))
+    from planning_agent import run_learning_path_request
+    from langchain_mistralai import ChatMistralAI
+
+    api_key = os.getenv("MISTRAL_API_KEY")
+    if not api_key:
+        return {
+            "answer": "Planning agent is unavailable: MISTRAL_API_KEY is not set.",
+            "planning_error": "missing_api_key",
+        }
+    llm = ChatMistralAI(api_key=api_key, model="mistral-small-latest", random_seed=42, max_retries=2)
+
+    payload = run_learning_path_request(student_id, message, llm, mode="dag")
+    return {
+        "answer": payload["result"],
+        "planning_artifact_path": payload["artifact_path"],
+        "self_refine_grounded_issues": payload.get("self_refine_grounded_issues", []),
+    }
+
 
 def _maybe_compact_buffer(stm: ShortTermMemory) -> None:
     """

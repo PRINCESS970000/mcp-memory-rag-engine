@@ -3,10 +3,11 @@ import sys
 import json
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "task_decomposition_and_planning"))
+ROOT = Path(__file__).resolve().parent.parent.parent  # repo root (planning/ now lives directly under it)
+sys.path.insert(0, str(ROOT))
 
-from planning_lab.algorithms.routing import route_and_execute_subtask
-from planning_lab.algorithms import Environment
+from planning.algorithms.routing import route_and_execute_subtask
+from planning.algorithms import Environment
 from langchain_mistralai import ChatMistralAI
 
 
@@ -15,7 +16,10 @@ if not os.environ.get("MISTRAL_API_KEY"):
 
 
 llm = ChatMistralAI(model="mistral-small-latest", temperature=0.2)
-env = Environment()
+# student_id=1 is Omar Khaled in db/seed.sql, with a real learning_goal
+# targeting Data Scientist -- matches what most test_subtasks below describe.
+_mcp_server_path = str((ROOT / "mcp_server").resolve())
+env = Environment(student_id=1, mcp_server_path=_mcp_server_path)
 
 
 test_subtasks = [

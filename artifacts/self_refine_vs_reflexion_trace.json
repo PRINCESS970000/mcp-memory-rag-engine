@@ -1,0 +1,55 @@
+{
+  "case_id": "salma_tight_constraints",
+  "student_id": 8,
+  "self_refine_single_pass": {
+    "success": false,
+    "final_course_ids": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "attempts": 2,
+    "final_score": 0.1667,
+    "latency_s": 0.002,
+    "details": [
+      "Course 2 requires course 6, which is neither completed nor included in the path.",
+      "Course 2 requires course 7, which is neither completed nor included in the path.",
+      "Path costs 1000.00, exceeding the budget of 500.00.",
+      "Course 1 ('Introduction to Computer Science') overlaps with others totalling 30.0 weekly hours, exceeding 8.0 available.",
+      "Course 2 ('Advanced Machine Learning') overlaps with others totalling 30.0 weekly hours, exceeding 8.0 available.",
+      "Course 3 ('Database Management Systems') overlaps with others totalling 30.0 weekly hours, exceeding 8.0 available.",
+      "Course 4 ('Software Engineering Principles') overlaps with others totalling 30.0 weekly hours, exceeding 8.0 available.",
+      "Course 3 starts 2026-09-01, before its prerequisite 1 ends (2026-10-13).",
+      "Course 4 starts 2026-09-08, before its prerequisite 1 ends (2026-10-13).",
+      "Path finishes 2026-12-08, after target date 2026-12-01."
+    ]
+  },
+  "reflexion_multi_trial": {
+    "success": false,
+    "final_course_ids": [
+      1,
+      3,
+      4,
+      6,
+      7,
+      14
+    ],
+    "num_trials": 3,
+    "final_score": 0.5,
+    "reflections": [
+      "I overloaded the schedule with overlapping courses that exceeded both weekly hour limits and prerequisites, while also missing the target completion date. Next time, I'll prioritize non-overlapping courses with lighter loads, ensure all prerequisites are met before starting dependent courses, and select a shorter path that finishes by the deadline.",
+      "I overloaded the schedule with conflicting courses that exceeded both weekly hour limits and prerequisite constraints, so next I\u2019ll select fewer courses (e.g., dropping 3, 4, 7, 14) and space them to fit within 8 hours while ensuring prerequisites finish before successors start.",
+      "I overloaded the schedule by selecting too many high-hour courses that clashed simultaneously, while ignoring prerequisite sequencing. Next, I\u2019ll prioritize fewer courses (e.g., drop 3, 4, 6, 14, and 7) and add lighter, non-overlapping alternatives like \"Introduction to Data Science\" (course 10) to stay under the 8-hour limit and respect prerequisites."
+    ],
+    "metrics": {
+      "algorithm": "Reflexion",
+      "llm_calls": 6,
+      "prompt_tokens": 4287,
+      "completion_tokens": 291,
+      "total_tokens": 4578,
+      "latency_seconds": 8.433,
+      "status": "failed"
+    }
+  }
+}

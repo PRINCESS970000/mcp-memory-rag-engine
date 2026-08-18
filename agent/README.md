@@ -170,3 +170,29 @@ environment (see `.env.example`); no credentials are committed.
 
 A full annotated transcript of a real run is in
 [`demo/demo_transcript.md`](demo/demo_transcript.md).
+
+## Planning Agent (Week 4 addition)
+
+A second, separate agent living in this same `agent/` folder:
+`planning_agent.py`. It does not share code with the memory/RAG agent
+above (`loop.py`'s `_handle_policy_question` / `_handle_memory_question` /
+`_handle_db_tool_question`) -- it owns a different real request: building
+or reshuffling a student's course path toward a target job role, which
+needs decomposition and search (real branching, real ambiguity, real cost
+to a wrong plan), not a single retrieval or DB lookup.
+
+- **Routing**: `intent_router.route_intent()` now returns `"planning"` for
+  requests like "what's my roadmap to become a Data Scientist", checked
+  before `POLICY`/`DB_TOOL` (a planning request can otherwise match
+  `DB_TOOL`'s "course" keyword).
+- **Implementation**: `agent/planning_agent.py` is a thin wrapper around
+  `task_decomposition_and_planning/planning_lab/` -- decomposition (both
+  methods), Plan-and-Solve / Tree of Thoughts / LATS routing, Self-Refine /
+  Reflexion, and the grounded `Environment`. Full writeup:
+  [`../task_decomposition_and_planning/README.md`](../task_decomposition_and_planning/README.md).
+- **Shared, not duplicated**: both agents reuse the same `mcp_server/` and
+  `db/` -- the Planning Agent's `Environment` calls
+  `mcp_server/server.py`'s `get_path_planning_data` directly, no separate
+  server or database.
+- **Tests**: `agent/test_planning_agent.py` (offline, fake LLM, real
+  grounded `Environment` against `db/brightpeak.db`).

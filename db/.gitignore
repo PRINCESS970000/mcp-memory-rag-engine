@@ -1,0 +1,4 @@
+*.backup
+*.before_planning_seed
+brightpeak.db
+Screenshot*.png

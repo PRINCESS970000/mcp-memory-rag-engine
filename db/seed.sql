@@ -17,23 +17,6 @@ INSERT INTO students (student_id, name, email, role) VALUES
 (8, 'Salma Farouk', 'salma.f@brightpeak.edu', 'STUDENT');
 
 
-INSERT INTO enrollments (enrollment_id, student_id, course_id, grade, status) VALUES 
-(1, 1, 1, 95.5, 'COMPLETED'),
-(2, 1, 2, 88.0, 'ENROLLED'),
-(3, 1, 3, 91.2, 'COMPLETED'),
-(4, 4, 1, 74.0, 'COMPLETED'),
-(5, 4, 3, 82.5, 'ENROLLED'),
-(6, 6, 2, 98.0, 'COMPLETED'),
-(7, 7, 1, 45.0, 'DROPPED'),
-(8, 8, 5, NULL, 'ENROLLED');
-
-
-INSERT INTO certificates (certificate_id, enrollment_id, certificate_code) VALUES 
-(1, 1, 'CERT-CS101-2026-001'),
-(2, 3, 'CERT-DBMS-2026-002'),
-(3, 4, 'CERT-CS101-2026-003'),
-(4, 6, 'CERT-AML-2026-004');
-
 INSERT INTO courses (course_id, title, instructor_id, credits, price, weekly_hours, duration_weeks, start_date, end_date, difficulty, skill_tags) VALUES
 (1,  'Introduction to Computer Science', 1, 3, 150, 6,  6, '2026-09-01', '2026-10-13', 'beginner',     'programming,cs_fundamentals'),
 (2,  'Advanced Machine Learning',        2, 4, 400, 10, 8, '2026-10-13', '2026-12-08', 'advanced',     'machine_learning,statistics,python'),
@@ -82,3 +65,19 @@ INSERT INTO learning_goals (student_id, target_role_id, weekly_hours_available, 
 (6, 3, 15, 1000, '2027-03-01'),
 (8, 2, 8, 500, '2026-12-01'),
 (7, 2, 8, 400, '2026-11-01');
+
+INSERT INTO enrollments (enrollment_id, student_id, course_id, grade, status) VALUES 
+(1, 1, 1, 95.5, 'COMPLETED'),
+(2, 1, 2, 88.0, 'ENROLLED'),
+(3, 1, 3, 91.2, 'COMPLETED'),
+(4, 4, 1, 74.0, 'COMPLETED'),
+(5, 4, 3, 82.5, 'ENROLLED'),
+(6, 6, 2, 98.0, 'COMPLETED'),
+(7, 7, 1, 45.0, 'DROPPED'),
+(8, 8, 5, NULL, 'ENROLLED');
+
+INSERT INTO certificates (certificate_id, enrollment_id, certificate_code) VALUES 
+(1, 1, 'CERT-CS101-2026-001'),
+(2, 3, 'CERT-DBMS-2026-002'),
+(3, 4, 'CERT-CS101-2026-003'),
+(4, 6, 'CERT-AML-2026-004');

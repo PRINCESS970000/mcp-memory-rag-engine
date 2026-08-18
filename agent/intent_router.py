@@ -45,6 +45,22 @@ POLICY_KEYWORDS = [
     "process",
 ]
 
+PLANNING_KEYWORDS = [
+    "learning path",
+    "career path",
+    "plan my courses",
+    "plan a path",
+    "help me plan",
+    "roadmap",
+    "study plan",
+    "course plan",
+    "become a data",
+    "become a software",
+    "become an ml",
+    "path to become",
+    "plan for me",
+]
+
 DB_KEYWORDS = [
     "grade",
     "grades",
@@ -72,6 +88,14 @@ def route_intent(message: str) -> str:
     # docstring above) but DB questions rarely contain a policy word.
     if any(k in text for k in POLICY_KEYWORDS):
         return "policy"
+
+    # Learning-path planning requests next -- checked before the generic DB
+    # keywords for the same reason as POLICY above: "plan my courses to
+    # become a Data Analyst" contains "course", a DB_KEYWORDS word, and
+    # would be misrouted to a plain profile lookup if DB_TOOL were checked
+    # first instead of recognizing this as a planning request.
+    if any(k in text for k in PLANNING_KEYWORDS):
+        return "planning"
 
     # Database lookups -- factual questions about a specific student's
     # current data.

@@ -151,6 +151,108 @@ Below is the summary of evaluation metrics collected across 9 representative tes
 
 ---
 
+### Planning Agent (`agent/planning_agent.py`, `planning/`)
+
+A separate agent from the memory/RAG agent above, owning a different real
+problem: a student asking for a personalized course path to reach a target
+job role, which has to respect real prerequisites, budget, weekly-hour
+capacity, and a deadline. `intent_router.route_intent()` sends these
+requests (checked before POLICY/DB_TOOL, since phrases like "path to
+become a Data Scientist" can otherwise match DB_TOOL's "course" keyword)
+to `agent/loop.py`'s `_handle_planning_question()`, which calls
+`planning_agent.run_learning_path_request()`. Both reuse the same
+`mcp_server/` and `db/` as every other agent — see
+`planning/README.md` for the full decomposition, planning-algorithm,
+self-correction, and grounding writeup, and `planning_eval/README.md` for
+the comparison table and evidence.
+
+## 📑 Overview & Architecture
+
+The planning subsystem receives task specifications and uses a **Routing Engine** to assign each subtask to the most suitable search and planning strategy:
+
+1. **Plan-and-Solve (PS):** Zero-shot / single-pass decomposition for deterministic parsing, formatting, and mathematical constraint calculations.
+2. **Tree of Thoughts (ToT):** Tree-based systematic search using beam-search evaluation and branch pruning for sequencing and ranking decisions under time/budget constraints.
+3. **Language Agent Tree Search (LATS):** Monte Carlo Tree Search (MCTS) enhanced with environment trajectory feedback and value scoring for schedule optimization.
+
+---
+
+##  Summary of Execution Traces & Performance Metrics
+
+Below is the summary of evaluation metrics collected across 9 representative test executions generated via `scripts/manual_router_check.py` (formerly `tests/test_runner.py` — moved out of `tests/` since it calls the real Mistral API and isn't an offline unit test) using **Mistral AI**:
+
+###  Overall Statistics
+
+| Metric | Plan-and-Solve | Tree of Thoughts | LATS |
+| --- | --- | --- | --- |
+| **Tasks Processed** | 2 | 5 | 2 |
+| **Avg Latency (s)** | ~1.71s | ~22.62s | ~4.39s |
+| **Avg LLM Calls** | 1 | 9 | 2 |
+| **Success Rate** | 100% | 100% | 100% |
+| **Key Output Attribute** | Deterministic Tokens | 6 branches / 2 pruned | Best Score: ~0.93 |
+
+
+
+###  Performance Breakdown by Algorithm
+
+#### 1. Plan-and-Solve (Deterministic Parsing & Formatting)
+
+* **LLM Calls:** 1 call per task
+* **Average Latency:** $1.71 \text{ seconds}$
+* **Average Tokens:** 386.5 total tokens ($175.5$ prompt + $211$ completion)
+* **Behavior:** Highly efficient, lowest latency, ideal for low-complexity operational tasks.
+
+#### 2. Tree of Thoughts (Course Sequencing & Path Ranking)
+
+* **LLM Calls:** 9 calls per task
+* **Average Latency:** $22.62 \text{ seconds}$
+* **Branching Factor:** 6 generated branches, 2 pruned branches
+* **Final Beam Size:** 2 optimal pathways retained
+* **Behavior:** Deep reasoning with high coverage, ideal for multi-option trade-off analysis.
+
+#### 3. LATS (Schedule Optimization with Environment Feedback)
+
+* **LLM Calls:** 2 calls per task
+* **Average Latency:** $4.39 \text{ seconds}$
+* **Iterations Used:** 1 iteration
+* **Best Reward Score:** Reached up to **0.933**
+* **Behavior:** Environment-guided dynamic trajectory sampling, high accuracy for multi-constraint schedule optimization.
+
+#### 4. Self-Refine vs. Reflexion (`salma_tight_constraints` case — student with the tightest simultaneous budget/hours/deadline in the seed data)
+
+| Method | Grounded score | Attempts | Behavior |
+| --- | --- | --- | --- |
+| Self-Refine (single pass) | 0.17 (1/6 checks) | 1 draft + 1 revision | Fixed nothing meaningfully: still over budget ($1000 vs $500), still 30 weekly hours vs. 8 available, still 2 unmet prerequisites, still misses the deadline. One revision (dropping the last course) can't fix constraints that interact this much. |
+| Reflexion (multi-trial) | 0.50 (3/6 checks) | 3 trials, 6 LLM calls | Each trial's grounded feedback becomes the next trial's explicit strategy ("I'll prioritize prerequisites first... space out high-hour courses...") — genuinely reasons about *why* it failed, not just retries blindly. Still doesn't fully succeed (this catalog's overlapping dates make full success for this student's 8hr/week cap genuinely hard), but reaches 3x Self-Refine's score. |
+
+Full trace: [`artifacts/self_refine_vs_reflexion_trace.json`](artifacts/self_refine_vs_reflexion_trace.json).
+Reflexion is what the agent ships with for the "propose a complete path" sub-task; Self-Refine is reserved for the cheap, low-interaction sub-task of writing the student-facing explanation (see `planning/algorithms/self_refine.py`'s module docstring).
+
+#### 5. Decomposition-first vs. dynamic decomposition
+
+| Case | Method | Result |
+| --- | --- | --- |
+| `omar_stable_plan` (roomy budget/hours/deadline, no known complications) | decomposition-first | 8-task plan generated in one shot, 16.6s. Cheaper and just as good — nothing in this student's real data forces a mid-plan change. |
+| `omar_stable_plan` | dynamic | 4 reactive steps, 9.9s. No divergence from decomposition-first — confirms the "roomy, stable" case doesn't need reactive planning. |
+| `kareem_dropped_course` (real `enrollments` row: course_id=1, grade=45.0, status=DROPPED) | decomposition-first | Generic 8-task plan (`verify prerequisites`, `select_courses`) — never specifically addresses the dropped course. |
+| `kareem_dropped_course` | dynamic | After observing the real DROPPED status in step 1, step 4's course search surfaces course_id=1 (the dropped course) as a candidate again — the plan reacts to the failure decomposition-first would have silently ignored. |
+
+Full trace: [`artifacts/decomposition_comparison_trace.json`](artifacts/decomposition_comparison_trace.json).
+Dynamic decomposition ships as the default for the top-level path request; decomposition-first is kept for the fully mechanical sub-tasks with no real branching (e.g. `t2`'s role-requirement lookup).
+
+#### 6. LATS grounded vs. ungrounded `Environment` (`hoda_many_valid_orderings` case)
+
+| Environment | LATS's own belief | Real grounded check of the same output |
+| --- | --- | --- |
+| Ungrounded (`RandomEnvironment`, the toolkit's original randomized default) | `success: true`, score 0.84, 1 iteration, 2 LLM calls | `success: false`, **score 0.5** — real budget exceeded by $930, weekly hours exceeded 2–3x over (up to 38 vs. the 15hr limit), and a real prerequisite/schedule violation (course 3 starts before its prerequisite, course 1, ends) |
+| Grounded (`Environment`, real MCP/DB checks) | `success: false`, score 0.83, 2 iterations, 10 LLM calls | Same — the score IS the real check, so there's no gap between belief and reality |
+
+Full trace: [`artifacts/lats_grounded_vs_ungrounded_trace.json`](artifacts/lats_grounded_vs_ungrounded_trace.json).
+This is the case the grounding requirement exists for: the ungrounded run finished faster and *believed* it had succeeded, but its own proposal would have double-booked the student and blown the budget by 93%. The grounded run costs 5x the LLM calls and never claims success on a genuinely infeasible catalog, which is the correct behavior. LATS ships wired to the real `Environment` for exactly this reason.
+
+**Full demo transcript combining all four comparisons above, plus a real Self-Refine draft→critique→revision on its actual designed sub-task:** [`planning_eval/demo_transcript.md`](planning_eval/demo_transcript.md).
+
+---
+
 ## How to run the full demo
 
 ```bash
@@ -163,6 +265,18 @@ python build_index.py             # (re)builds the Chroma index from policies/
 
 cd ../agent
 python run_demo.py                # runs one policy question + one memory question end-to-end
+python -c "
+from short_term import ShortTermMemory
+from loop import handle_message
+stm = ShortTermMemory(session_id='demo-planning-session', student_id=4)
+print(handle_message(stm, 4, 'Help me plan a learning path to become a Data Analyst'))
+"                                  # routes to the Planning Agent instead
+
+cd ..
+python -m planning.cli "Build my course path to become a Data Analyst" --mode dynamic --student-id 4
+                                   # or --mode dag -- see planning/cli.py --help
+python -m planning_eval.run_reflexion_vs_selfrefine
+                                   # Self-Refine vs Reflexion comparison, saves artifacts/ trace
 ```
 
 ## Repository layout
@@ -173,7 +287,10 @@ python run_demo.py                # runs one policy question + one memory questi
 - `policies/` — the RAG corpus, grounded in the actual `db/` schema (status, grade, role, certificate_code — no invented fields)
 - `rag/` — chunking/ingestion, Chroma vector store, naive/hybrid/agentic RAG, Self-RAG verification
 - `retrieval_eval/` — 12 domain-specific test questions, comparison script, debugging log
-- `agent/` — integration layer: intent routing + the unified agent loop
+- `agent/` — integration layer: intent routing + the unified agent loop (memory/RAG agent + Planning Agent)
+- `planning/` — the Planning Agent's implementation: decomposition (both methods), Plan-and-Solve/Tree of Thoughts/LATS, Self-Refine/Reflexion, the grounded `Environment`. Forked from [AmrSheta22/task_decomposition_and_planning](https://github.com/AmrSheta22/task_decomposition_and_planning) and adapted to this project's real MCP tools and database.
+- `planning_eval/` — the Planning Agent's fixed test suite, comparison scripts, and evidence traces backing the comparison table below
+- `artifacts/` — JSON run traces from both agents (plans, node outputs, critic feedback, episodic memories, MCTS visits, branch reflections)
 
 ## Setup
 
@@ -188,3 +305,13 @@ ANTHROPIC_API_KEY=your_key_here
 (Not required for `run_demo.py`'s db_tool/memory paths or for the
 retrieval-only comparison script; required for live generation via
 `rag/generate.py` and the LLM-based Self-RAG support check.)
+
+Add to the same root `.env` file:
+```
+MISTRAL_API_KEY=your_key_here
+```
+(Used by `planning/cli.py` and `agent/planning_agent.py` for every
+algorithm in the Planning Agent — decomposition, Plan-and-Solve, Tree of
+Thoughts, LATS, Self-Refine, and Reflexion — all through one consistent
+`langchain-mistralai` client, so the whole planning subsystem needs only
+this one key, not a second provider.)

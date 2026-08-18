@@ -19,7 +19,6 @@ from .algorithms import (
     lats,
     plan_and_solve,
     reflexion,
-    reflect_and_refine,
     Environment,
     tree_of_thoughts,
 )
@@ -43,8 +42,15 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--memory-size", type=int, default=3, choices=range(1, 6))
     cli.add_argument("--iterations", type=int, default=2, choices=range(1, 6))
     cli.add_argument("--n-actions", type=int, default=2, choices=range(1, 4))
-    cli.add_argument("--success-threshold", type=float, default=0.6)
-    cli.add_argument("--no-reflection", action="store_true")
+    cli.add_argument(
+        "--student-id",
+        type=int,
+        default=1,
+        help="Real student_id in db/brightpeak.db; required for --mode reflexion/lats "
+             "since Environment grounds every check against that student's real "
+             "courses, prerequisites, and learning_goal (see mcp_server/server.py's "
+             "get_path_planning_data).",
+    )
     return cli
 
 
@@ -76,40 +82,59 @@ def main() -> None:
     payload: dict = {"mode": args.mode, "model": args.model, "goal": args.goal}
 
     if args.mode == "dag":
+        # Grounded: same real student/catalog Environment as --mode
+        # reflexion/lats below, so the synthesis task's Self-Refine pass
+        # (refine_synthesis_output) checks claims against real data too.
+        mcp_server_path = str((ROOT / "mcp_server").resolve())
+        environment = Environment(args.student_id, mcp_server_path=mcp_server_path)
         plan = decompose_goal(args.goal, llm)
         print("Execution batches:", plan.execution_batches())
-        outputs = execute_plan(plan, llm)
-        draft = final_output(plan, outputs)
-        reflection = reflect_and_refine(args.goal, draft, llm) if not args.no_reflection else None
-        result = reflection.revised if reflection else draft
-        payload.update(plan=plan.model_dump(), outputs=outputs, result=result)
-        if reflection:
-            payload["reflection"] = {
-                "grounded_issues": reflection.grounded_issues,
-                "critique": reflection.critique,
-                "revised": reflection.revised != reflection.draft,
-            }
+        outputs, metrics_by_task = execute_plan(plan, llm, environment=environment)
+        raw_result = final_output(plan, outputs)
+
+        from .algorithms.self_refine import refine_synthesis_output
+        refinement = refine_synthesis_output(args.goal, raw_result, environment, llm)
+        result = refinement.revised
+
+        payload.update(
+            student_id=args.student_id,
+            plan=plan.model_dump(),
+            outputs=outputs,
+            metrics_by_task=metrics_by_task,
+            raw_synthesis_output=raw_result,
+            self_refine_grounded_issues=refinement.grounded_issues,
+            result=result,
+        )
     elif args.mode == "dynamic":
         history = dynamic_decomposition(args.goal, llm)
         result = history[-1][1] if history else "Planner reported the goal was already complete."
         payload.update(history=history, result=result)
     elif args.mode == "ps":
-        result = plan_and_solve(args.goal, llm)
-        payload["result"] = result
+        result, metrics = plan_and_solve(args.goal, llm)
+        payload.update(result=result, metrics=metrics)
     elif args.mode == "tot":
-        thoughts = tree_of_thoughts(args.goal, llm, args.depth, args.beam_width)
+        thoughts, metrics = tree_of_thoughts(args.goal, llm, args.depth, args.beam_width)
         result = thoughts[0].state if thoughts else "No viable thought survived."
-        payload.update(thoughts=[thought.model_dump() for thought in thoughts], result=result)
-    elif args.mode == "reflexion":
-        environment = Environment(success_threshold=args.success_threshold)
-        outcome = reflexion(args.goal, llm, environment, args.max_trials, args.memory_size)
-        result = outcome.output
         payload.update(
+            thoughts=[thought.model_dump() for thought in thoughts],
+            result=result,
+            metrics=metrics,
+        )
+    elif args.mode == "reflexion":
+        # Grounded: real student, real catalog/prerequisites/budget from
+        # db/brightpeak.db via mcp_server's get_path_planning_data tool.
+        mcp_server_path = str((ROOT / "mcp_server").resolve())
+        environment = Environment(args.student_id, mcp_server_path=mcp_server_path)
+        catalog_data = environment.get_catalog_data()
+        outcome = reflexion(environment, catalog_data, llm, args.max_trials, args.memory_size)
+        result = str(outcome.best_course_ids)
+        payload.update(
+            student_id=args.student_id,
             success=outcome.success,
             trials=[
                 {
                     "number": trial.number,
-                    "attempt": trial.attempt,
+                    "course_ids": trial.course_ids,
                     "feedback": trial.feedback.model_dump(),
                     "reflection": trial.reflection,
                 }
@@ -117,17 +142,21 @@ def main() -> None:
             ],
             memory=outcome.memory,
             result=result,
+            metrics=outcome.metrics,
         )
     else:
-        environment = Environment(success_threshold=args.success_threshold)
-        outcome = lats(args.goal, llm, environment, args.iterations, args.n_actions)
+        mcp_server_path = str((ROOT / "mcp_server").resolve())
+        environment = Environment(args.student_id, mcp_server_path=mcp_server_path)
+        outcome, metrics = lats(args.goal, llm, environment, args.iterations, args.n_actions)
         result = outcome.output
         payload.update(
+            student_id=args.student_id,
             success=outcome.success,
             best_score=outcome.best_score,
             iterations=outcome.iterations,
             tree=flatten_lats_tree(outcome.root),
             result=result,
+            metrics=metrics,
         )
 
     artifact = save_artifact(payload)

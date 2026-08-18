@@ -16,6 +16,7 @@ class LATSAction(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     action: str = Field(min_length=2)
+    course_ids: list[int] = Field(min_length=1)
     state: str = Field(min_length=2)
 
 
@@ -29,6 +30,18 @@ class ValueEstimate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     score: float = Field(ge=0.0, le=1.0)
+
+
+def _extract_token_usage(raw_message) -> Tuple[int, int]:
+    """Same fix as tree_of_thoughts.py: with_structured_output(...).invoke()
+    returns only the parsed pydantic object (no response_metadata) unless
+    include_raw=True is passed, which returns {"raw": AIMessage, "parsed": ...}.
+    Without this, token counts silently stayed at 0 for every LATS call."""
+    if raw_message is None:
+        return 0, 0
+    metadata = getattr(raw_message, "response_metadata", None) or {}
+    usage = metadata.get("token_usage", {})
+    return usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
 
 
 @dataclass
@@ -105,7 +118,38 @@ def lats(
     - Integrates external EnvironmentFeedback provided by Person 3's validator.
     """
     start_time = time.time()
-    
+
+    planning_data = environment.get_catalog_data()
+
+    courses_by_id = {
+        c["course_id"]: c
+        for c in planning_data["courses"]
+    }
+
+    goal_data = planning_data["learning_goal"]
+
+    catalog_text = "\n".join(
+        f"Course {c['course_id']}: {c['title']} | "
+        f"price=${c['price']} | "
+        f"weekly_hours={c['weekly_hours']} | "
+        f"dates={c['start_date']} to {c['end_date']} | "
+        f"difficulty={c['difficulty']} | "
+        f"skills={c['skill_tags']}"
+        for c in planning_data["courses"]
+    )
+
+    constraints_text = f"""
+Target role required skills:
+{", ".join(planning_data["required_skills"])}
+
+Budget: ${goal_data["budget"]}
+Weekly hours available: {goal_data["weekly_hours_available"]}
+Target date: {goal_data["target_date"]}
+Completed courses: {planning_data["completed_course_ids"]}
+
+Prerequisites:
+{planning_data["prerequisites"]}
+"""
     if iterations < 1 or n_actions < 1:
         raise ValueError("iterations and n_actions must be positive")
         
@@ -127,35 +171,76 @@ def lats(
 
         # 2. Expansion / Simulation Phase
         action_prompt = [
-            ("system", "You are the action generator in LATS for Adaptive Learning Path Planning."),
-            ("human", f"""Task: {task}
+            (
+                "system",
+                """You are the action generator in LATS for Adaptive Learning Path Planning.
+
+IMPORTANT RULES:
+1. You MUST use ONLY courses from the provided BrightPeak course catalog.
+2. You MUST NOT invent courses, providers, platforms, prices, durations, skills, roles, or deadlines.
+3. Every candidate MUST use course IDs from the catalog.
+4. Respect prerequisites, budget, weekly-hour limit, required skills, and deadline.
+5. The student's completed courses are already satisfied.
+6. Prefer a valid feasible path over an impressive but invented path."""
+            ),
+            (
+                "human",
+                f"""Task:
+{task}
+
+REAL STUDENT CONSTRAINTS:
+{constraints_text}
+
+REAL BRIGHTPEAK COURSE CATALOG:
+{catalog_text}
+
 Current trajectory/state:
 {leaf.state}
+
 Reflections learned from failed branches:
 {lesson_text}
 
-Propose exactly {n_actions} distinct complete candidate learning path schedule(s). Each proposed state must
-contain a complete learning path plan with course order, total cost, and weekly hours, without placeholders."""),
+Propose exactly {n_actions} distinct candidate learning paths.
+
+For EACH candidate:
+- provide course_ids in the intended order
+- use ONLY course IDs from the catalog
+- provide a complete human-readable state
+- include total cost
+- include weekly hours
+- make sure prerequisites are satisfied
+- cover the required skills
+- finish by the target date
+
+Do NOT invent any course."""
+            ),
         ]
 
-        proposed = llm.with_structured_output(
+        proposed_result = llm.with_structured_output(
             LATSActionBatch,
             method="json_schema",
+            include_raw=True,
         ).invoke(action_prompt, temperature=0.5)
-        
+        proposed = proposed_result["parsed"]
+
         total_llm_calls += 1
 
-        if hasattr(proposed, "response_metadata") and "token_usage" in proposed.response_metadata:
-            usage = proposed.response_metadata["token_usage"]
-            total_prompt_tokens += usage.get("prompt_tokens", 0)
-            total_completion_tokens += usage.get("completion_tokens", 0)
+        prompt_tok, completion_tok = _extract_token_usage(proposed_result["raw"])
+        total_prompt_tokens += prompt_tok
+        total_completion_tokens += completion_tok
 
         for item in proposed.actions[:n_actions]:
-            child = LATSNode(state=item.state.strip(), action=item.action, parent=leaf)
+            child_state = item.state.strip()
+
+            child = LATSNode(
+                state=child_state,
+                action=item.action,
+                 parent=leaf,
+            )
             leaf.children.append(child)
 
             # 3. Evaluation Phase (Grounded Feedback from Person 3's Environment)
-            feedback = environment.evaluate(child.state)
+            feedback = environment.evaluate(item.course_ids)
             child.feedback = feedback
             child.environment_score = feedback.score
 
@@ -163,6 +248,10 @@ contain a complete learning path plan with course order, total cost, and weekly 
             value_prompt = [
                 ("system", "You are the LATS value function estimating learning path quality."),
                 ("human", f"""Task: {task}
+
+Candidate course IDs:
+{item.course_ids}
+
 Candidate state:
 {child.state}
 External score: {feedback.score}
@@ -170,17 +259,18 @@ External feedback: {feedback.details}
 Estimate the candidate's future usefulness for the student's career goal."""),
             ]
 
-            value_judgment = llm.with_structured_output(
+            value_result = llm.with_structured_output(
                 ValueEstimate,
                 method="json_schema",
+                include_raw=True,
             ).invoke(value_prompt, temperature=0.1)
-            
+            value_judgment = value_result["parsed"]
+
             total_llm_calls += 1
 
-            if hasattr(value_judgment, "response_metadata") and "token_usage" in value_judgment.response_metadata:
-                usage = value_judgment.response_metadata["token_usage"]
-                total_prompt_tokens += usage.get("prompt_tokens", 0)
-                total_completion_tokens += usage.get("completion_tokens", 0)
+            prompt_tok, completion_tok = _extract_token_usage(value_result["raw"])
+            total_prompt_tokens += prompt_tok
+            total_completion_tokens += completion_tok
 
             child.model_score = value_judgment.score
             
@@ -193,6 +283,7 @@ Estimate the candidate's future usefulness for the student's career goal."""),
                     ("system", "Create a branch-level LATS reflection grounded in environment feedback."),
                     ("human", f"""Task: {task}
 Action: {child.action}
+Course IDs: {item.course_ids}
 Resulting state: {child.state}
 External feedback: {feedback.details}
 Explain briefly why this proposed learning path failed and how a later expansion should change."""),

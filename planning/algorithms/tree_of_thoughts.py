@@ -19,6 +19,19 @@ class ThoughtEvaluation(BaseModel):
     rationale: str
 
 
+def _extract_token_usage(raw_message) -> tuple[int, int]:
+    """Pull (prompt_tokens, completion_tokens) out of the raw AIMessage that
+    with_structured_output(..., include_raw=True) returns. Without
+    include_raw=True, invoke() only returns the parsed pydantic object,
+    which never carries response_metadata -- that was the bug: token counts
+    silently stayed at 0 for every ToT/LATS call."""
+    if raw_message is None:
+        return 0, 0
+    metadata = getattr(raw_message, "response_metadata", None) or {}
+    usage = metadata.get("token_usage", {})
+    return usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+
+
 def tree_of_thoughts(
     problem: str,
     llm: BaseChatModel,
@@ -58,18 +71,20 @@ Current Partial Course Sequence: {parent.state}
 Propose two distinct promising course selection options or next logical learning steps that respect prerequisites, weekly hour limits, and budget."""),
             ]
             
-            gen_res = llm.with_structured_output(
+            gen_result = llm.with_structured_output(
                 ThoughtCandidates,
                 method="json_schema",
+                include_raw=True,
             ).invoke(candidate_prompt, temperature=0.5)
-            
+            gen_res = gen_result["parsed"]
+
             total_llm_calls += 1
-            
-            # Record Token Usage if available
-            if hasattr(gen_res, "response_metadata") and "token_usage" in gen_res.response_metadata:
-                usage = gen_res.response_metadata["token_usage"]
-                total_prompt_tokens += usage.get("prompt_tokens", 0)
-                total_completion_tokens += usage.get("completion_tokens", 0)
+
+            # Record Token Usage (raw AIMessage carries response_metadata;
+            # the parsed schema object above never does)
+            prompt_tok, completion_tok = _extract_token_usage(gen_result["raw"])
+            total_prompt_tokens += prompt_tok
+            total_completion_tokens += completion_tok
 
             # 2. Self-Evaluation Phase for each generated branch
             for state in gen_res.candidates[:2]:
@@ -84,17 +99,18 @@ Score this candidate step on feasibility, prerequisite logic, weekly workload ad
 Do not reward confident wording; prioritize realistic course progression."""),
                 ]
                 
-                judged = llm.with_structured_output(
+                judge_result = llm.with_structured_output(
                     ThoughtEvaluation,
                     method="json_schema",
+                    include_raw=True,
                 ).invoke(eval_prompt, temperature=0.1)
-                
+                judged = judge_result["parsed"]
+
                 total_llm_calls += 1
-                
-                if hasattr(judged, "response_metadata") and "token_usage" in judged.response_metadata:
-                    usage = judged.response_metadata["token_usage"]
-                    total_prompt_tokens += usage.get("prompt_tokens", 0)
-                    total_completion_tokens += usage.get("completion_tokens", 0)
+
+                prompt_tok, completion_tok = _extract_token_usage(judge_result["raw"])
+                total_prompt_tokens += prompt_tok
+                total_completion_tokens += completion_tok
 
                 candidates.append(
                     Thought(state=state, score=judged.score, rationale=judged.rationale)

@@ -12,7 +12,7 @@ Usage:
 import sqlite3
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "db", "brightpeak.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "brightpeak.db")
 
 
 def column_exists(cursor, table, column):
