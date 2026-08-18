@@ -2,7 +2,8 @@
 CREATE TABLE IF NOT EXISTS instructors (
     instructor_id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL
+    email TEXT UNIQUE NOT NULL ,
+    rating REAL DEFAULT 4.0
 );
 
 CREATE TABLE IF NOT EXISTS courses (
@@ -10,9 +11,15 @@ CREATE TABLE IF NOT EXISTS courses (
     title TEXT NOT NULL,
     instructor_id INTEGER,
     credits INTEGER NOT NULL,
+    price REAL DEFAULT 0,
+    weekly_hours REAL DEFAULT 0,
+    duration_weeks INTEGER DEFAULT 0,
+    start_date TEXT,
+    end_date TEXT,
+    difficulty TEXT,        -- beginner/intermediate/advanced
+    skill_tags TEXT,        -- comma-separated
     FOREIGN KEY (instructor_id) REFERENCES instructors(instructor_id)
 );
-
 
 CREATE TABLE IF NOT EXISTS students (
     student_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,3 +67,33 @@ CREATE TABLE semantic_facts (
     valid_until TIMESTAMP,   
     superseded_by INTEGER     
 );
+
+CREATE TABLE course_prerequisites (
+    course_id INTEGER,
+    prerequisite_course_id INTEGER,
+    FOREIGN KEY (course_id) REFERENCES courses(course_id),
+    FOREIGN KEY (prerequisite_course_id) REFERENCES courses(course_id)
+);
+
+
+CREATE TABLE job_roles (
+    role_id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL
+);
+
+CREATE TABLE role_required_skills (
+    role_id INTEGER,
+    skill_tag TEXT,
+    FOREIGN KEY (role_id) REFERENCES job_roles(role_id)
+);
+
+CREATE TABLE learning_goals (
+    goal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER,
+    target_role_id INTEGER,
+    weekly_hours_available REAL,
+    budget REAL,
+    target_date TEXT,
+    FOREIGN KEY (student_id) REFERENCES students(student_id),
+    FOREIGN KEY (target_role_id) REFERENCES job_roles(role_id)
+); 
