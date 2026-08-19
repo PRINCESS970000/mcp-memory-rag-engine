@@ -1,11 +1,12 @@
 import sqlite3
 import os
 import re
-import time
-import asyncio
 import sys
+import asyncio
 from fastmcp import FastMCP, Context
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from state_graph.base import init_checkpointing_tables
 
 mcp = FastMCP("Brightpeak Academy Server")
 
@@ -23,11 +24,16 @@ def get_db_connection():
 
 
 def init_messages_table():
-    """Creates operational and infrastructure tables if they don't already exist."""
+    """Creates operational tables only. Infrastructure tables (checkpoints,
+    hitl_tasks, failure_tickets) live in state_graph/checkpointing/base.py
+    and MUST NOT be redefined here - see Issue #<ضيف رقم الـ issue هنا>:
+    كانت السكيما القديمة هنا بتتصادم مع الطبقة المشتركة وتكسر save_checkpoint
+    بـ 'OperationalError: table checkpoints has no column named state_json'
+    لو السيرفر اشتغل واعمل init قبل أي graph."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # 1. Chat Messages Table
+
+    # Chat Messages Table (خاص بالسيرفر ده فقط - مش infra مشتركة)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             message_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,38 +49,12 @@ def init_messages_table():
         ON messages (session_id, created_at)
     """)
 
-    # 2. Infrastructure Tables (Checkpoints, HITL, Failure Tickets)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS checkpoints (
-            thread_id TEXT,
-            node_name TEXT,
-            state_data TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (thread_id, node_name)
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS hitl_tasks (
-            task_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            thread_id TEXT,
-            prompt TEXT,
-            required_role TEXT,
-            status TEXT DEFAULT 'PENDING',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS failure_tickets (
-            ticket_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            thread_id TEXT,
-            error_message TEXT,
-            status TEXT DEFAULT 'OPEN',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
     conn.commit()
     conn.close()
+
+    # جداول checkpoints / hitl_tasks / failure_tickets بتتعمل من الطبقة
+    # المشتركة فقط - نفس ملف DB_PATH بالظبط، بدون أي تعريف محلي هنا.
+    init_checkpointing_tables()
 
 
 # Ensure tables exist as soon as the module loads.
@@ -244,32 +224,51 @@ def enroll_student(student_id: int, course_id: int) -> dict:
 
 @mcp.tool(
     name="update_student_grade",
-    description="Updates a student's grade for a specific course. Requires INSTRUCTOR or ADMIN role and strict input validation."
+    description="Updates a student's grade for a specific course. Requires INSTRUCTOR or ADMIN role, verified server-side against the requester's own record - never trusted from client input."
 )
-def update_student_grade(student_id: int, course_id: int, new_grade: float, requester_role: str) -> dict:
+def update_student_grade(student_id: int, course_id: int, new_grade: float, requester_email: str) -> dict:
+    """
+    ملاحظة أمان مهمة (كانت الملاحظة القديمة في التقييم):
+    قبل كده كانت الدالة بتاخد `requester_role` كـ string مباشر من الكلاينت
+    وتثق فيه - أي حد كان يقدر يبعت requester_role="ADMIN" ويعدّي الفحص من
+    غير أي تحقق حقيقي. دلوقتي بناخد `requester_email` بس، ونجيب الـ role
+    الحقيقي بتاعه من جدول students في السيرفر نفسه - العميل مبقاش يقدر
+    يتحكم في الصلاحية اللي بيتفحص بيها.
+    """
     allowed_roles = ["INSTRUCTOR", "ADMIN"]
-    if requester_role not in allowed_roles:
-        return {
-            "status": "error",
-            "message": f"Authorization denied. Role '{requester_role}' is not permitted to modify grades."
-        }
-
-    if not (0.0 <= new_grade <= 100.0):
-        return {
-            "status": "error",
-            "message": "Invalid grade. Grade must be between 0.0 and 100.0."
-        }
-
-    if student_id <= 0 or course_id <= 0:
-        return {
-            "status": "error",
-            "message": "Student ID and Course ID must be positive integers."
-        }
 
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
+        cursor.execute("SELECT role FROM students WHERE email = ?", (requester_email,))
+        requester = cursor.fetchone()
+
+        if not requester:
+            return {
+                "status": "error",
+                "message": f"Requester '{requester_email}' not found. Authorization denied."
+            }
+
+        requester_role = requester["role"]
+        if requester_role not in allowed_roles:
+            return {
+                "status": "error",
+                "message": f"Authorization denied. Role '{requester_role}' is not permitted to modify grades."
+            }
+
+        if not (0.0 <= new_grade <= 100.0):
+            return {
+                "status": "error",
+                "message": "Invalid grade. Grade must be between 0.0 and 100.0."
+            }
+
+        if student_id <= 0 or course_id <= 0:
+            return {
+                "status": "error",
+                "message": "Student ID and Course ID must be positive integers."
+            }
+
         cursor.execute(
             "SELECT enrollment_id FROM enrollments WHERE student_id = ? AND course_id = ?",
             (student_id, course_id)
@@ -371,13 +370,17 @@ def store_message(session_id: str, role: str, content: str, student_id: int = No
 
         if total > MAX_HISTORY_PER_SESSION:
             excess = total - MAX_HISTORY_PER_SESSION
+            # ملاحظة: created_at بدقة الثانية فقط في SQLite، فلو اتسجلت رسايل
+            # كتير في نفس الثانية، الترتيب بينهم بـ created_at وحده عشوائي
+            # (نفس مشكلة الـ checkpoints بالظبط). بنضيف message_id كـ
+            # tie-breaker ثانوي عشان نضمن مسح الأقدم فعليًا مش أي حد عشوائي.
             cursor.execute(
                 """
                 DELETE FROM messages
                 WHERE message_id IN (
                     SELECT message_id FROM messages
                     WHERE session_id = ?
-                    ORDER BY created_at ASC
+                    ORDER BY created_at ASC, message_id ASC
                     LIMIT ?
                 )
                 """,
@@ -411,7 +414,7 @@ def get_chat_history(session_id: str, limit: int = MAX_HISTORY_PER_SESSION) -> d
         """
         SELECT role, content, created_at FROM messages
         WHERE session_id = ?
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, message_id DESC
         LIMIT ?
         """,
         (session_id, limit)

@@ -62,4 +62,4 @@ state = run_or_resume_graph(THREAD)
 show("Run #4: resume -> finalized", state)
 assert state["status"] == "finalized"
 
-print("\n Execution completed successfully! ✅")
+print("\n Execution completed successfully! ")
