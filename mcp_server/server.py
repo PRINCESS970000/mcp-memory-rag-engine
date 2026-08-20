@@ -9,7 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from state_graph.base import init_checkpointing_tables
 
 mcp = FastMCP("Brightpeak Academy Server")
-
+import scholarship_tools
 
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "db", "brightpeak.db"))
 
