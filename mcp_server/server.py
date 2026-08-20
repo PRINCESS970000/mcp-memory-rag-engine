@@ -1,19 +1,19 @@
 import sqlite3
 import os
 import re
-import time
-import asyncio
 import sys
+import asyncio
 from fastmcp import FastMCP, Context
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from state_graph.base import init_checkpointing_tables
 
 mcp = FastMCP("Brightpeak Academy Server")
+import scholarship_tools
 
-
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "brightpeak.db")
+DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "db", "brightpeak.db"))
 
 # Rolling buffer: max number of messages kept per session.
-# Once a session exceeds this, the oldest messages are deleted.
 MAX_HISTORY_PER_SESSION = 20
 
 
@@ -24,9 +24,16 @@ def get_db_connection():
 
 
 def init_messages_table():
-    """Creates the messages table if it doesn't already exist."""
+    """Creates operational tables only. Infrastructure tables (checkpoints,
+    hitl_tasks, failure_tickets) live in state_graph/checkpointing/base.py
+    and MUST NOT be redefined here - see Issue #<ضيف رقم الـ issue هنا>:
+    كانت السكيما القديمة هنا بتتصادم مع الطبقة المشتركة وتكسر save_checkpoint
+    بـ 'OperationalError: table checkpoints has no column named state_json'
+    لو السيرفر اشتغل واعمل init قبل أي graph."""
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    # Chat Messages Table (خاص بالسيرفر ده فقط - مش infra مشتركة)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             message_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,17 +48,25 @@ def init_messages_table():
         CREATE INDEX IF NOT EXISTS idx_messages_session
         ON messages (session_id, created_at)
     """)
+
     conn.commit()
     conn.close()
 
+    # جداول checkpoints / hitl_tasks / failure_tickets بتتعمل من الطبقة
+    # المشتركة فقط - نفس ملف DB_PATH بالظبط، بدون أي تعريف محلي هنا.
+    init_checkpointing_tables()
 
-# Ensure the table exists as soon as the module loads.
+
+# Ensure tables exist as soon as the module loads.
 init_messages_table()
 
 
+# ======================================================
+# Core Academic Tools
+# ======================================================
+
 @mcp.tool()
 def get_student_profile(email: str) -> dict:
-    # 1. Input Validation:
     email_regex = r"^[\w\.-]+@[\w\.-]+\.\w+$"
     if not re.match(email_regex, email):
         return {"status": "error", "message": "Invalid email format."}
@@ -59,7 +74,6 @@ def get_student_profile(email: str) -> dict:
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # 2. Logic Validation:
     cursor.execute("SELECT * FROM students WHERE email = ?", (email,))
     student = cursor.fetchone()
 
@@ -67,7 +81,6 @@ def get_student_profile(email: str) -> dict:
         conn.close()
         return {"status": "error", "message": f"Student with email '{email}' not found."}
 
-    # 3. Fetching Enrolled Courses and Grades
     query = """
         SELECT c.title, e.grade, e.status
         FROM enrollments e
@@ -109,24 +122,18 @@ def list_all_courses() -> dict:
         "courses": [dict(row) for row in rows]
     }
 
+
 @mcp.tool()
 def get_path_planning_data(student_id: int) -> dict:
-    """Return everything the learning-path planning agent needs for one student:
-    full course catalog, prerequisite edges, the student's completed courses,
-    their learning goal (target role / weekly hours / budget / deadline), and
-    the skills required for their target role.
-    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # 1. Validate the student exists
     cursor.execute("SELECT * FROM students WHERE student_id = ?", (student_id,))
     student = cursor.fetchone()
     if not student:
         conn.close()
         return {"status": "error", "message": f"Student {student_id} not found."}
 
-    # 2. Full course catalog (everything environment.py needs per course)
     cursor.execute("""
         SELECT course_id, title, instructor_id, credits, price, weekly_hours,
                duration_weeks, start_date, end_date, difficulty, skill_tags
@@ -134,21 +141,18 @@ def get_path_planning_data(student_id: int) -> dict:
     """)
     courses = [dict(row) for row in cursor.fetchall()]
 
-    # 3. Prerequisite edges: course_id depends on prerequisite_course_id
     cursor.execute("""
         SELECT course_id, prerequisite_course_id
         FROM course_prerequisites
     """)
     prerequisites = [dict(row) for row in cursor.fetchall()]
 
-    # 4. Courses this student has already completed
     cursor.execute("""
         SELECT course_id FROM enrollments
         WHERE student_id = ? AND status = 'COMPLETED'
     """, (student_id,))
     completed_course_ids = [row["course_id"] for row in cursor.fetchall()]
 
-    # 5. The student's learning goal (may be None if they haven't set one)
     cursor.execute("""
         SELECT goal_id, target_role_id, weekly_hours_available, budget, target_date
         FROM learning_goals
@@ -158,7 +162,6 @@ def get_path_planning_data(student_id: int) -> dict:
     goal_row = cursor.fetchone()
     learning_goal = dict(goal_row) if goal_row else None
 
-    # 6. Skills required for the target role (only if a goal exists)
     required_skills = []
     if learning_goal:
         cursor.execute("""
@@ -181,9 +184,9 @@ def get_path_planning_data(student_id: int) -> dict:
         }
     }
 
+
 @mcp.tool()
 def enroll_student(student_id: int, course_id: int) -> dict:
-    # 1. Input Validation:
     if student_id <= 0 or course_id <= 0:
         return {"status": "error", "message": "Student ID and Course ID must be positive integers."}
 
@@ -191,17 +194,14 @@ def enroll_student(student_id: int, course_id: int) -> dict:
     cursor = conn.cursor()
 
     try:
-        # 2. Logic Validation
         cursor.execute("SELECT student_id FROM students WHERE student_id = ?", (student_id,))
         if not cursor.fetchone():
             return {"status": "error", "message": f"Student ID {student_id} does not exist."}
 
-        # 3. Logic Validation:
         cursor.execute("SELECT course_id FROM courses WHERE course_id = ?", (course_id,))
         if not cursor.fetchone():
             return {"status": "error", "message": f"Course ID {course_id} does not exist."}
 
-        # 4. Duplicate Check:
         cursor.execute(
             "SELECT enrollment_id FROM enrollments WHERE student_id = ? AND course_id = ?",
             (student_id, course_id)
@@ -209,7 +209,6 @@ def enroll_student(student_id: int, course_id: int) -> dict:
         if cursor.fetchone():
             return {"status": "error", "message": "Student is already enrolled in this course."}
 
-        # 5. Insert Enrollment Record
         cursor.execute(
             "INSERT INTO enrollments (student_id, course_id, status) VALUES (?, ?, 'ENROLLED')",
             (student_id, course_id)
@@ -225,35 +224,51 @@ def enroll_student(student_id: int, course_id: int) -> dict:
 
 @mcp.tool(
     name="update_student_grade",
-    description="Updates a student's grade for a specific course. Requires INSTRUCTOR or ADMIN role and strict input validation."
+    description="Updates a student's grade for a specific course. Requires INSTRUCTOR or ADMIN role, verified server-side against the requester's own record - never trusted from client input."
 )
-def update_student_grade(student_id: int, course_id: int, new_grade: float, requester_role: str) -> dict:
-    # 1. Authorization Check
+def update_student_grade(student_id: int, course_id: int, new_grade: float, requester_email: str) -> dict:
+    """
+    ملاحظة أمان مهمة (كانت الملاحظة القديمة في التقييم):
+    قبل كده كانت الدالة بتاخد `requester_role` كـ string مباشر من الكلاينت
+    وتثق فيه - أي حد كان يقدر يبعت requester_role="ADMIN" ويعدّي الفحص من
+    غير أي تحقق حقيقي. دلوقتي بناخد `requester_email` بس، ونجيب الـ role
+    الحقيقي بتاعه من جدول students في السيرفر نفسه - العميل مبقاش يقدر
+    يتحكم في الصلاحية اللي بيتفحص بيها.
+    """
     allowed_roles = ["INSTRUCTOR", "ADMIN"]
-    if requester_role not in allowed_roles:
-        return {
-            "status": "error",
-            "message": f"Authorization denied. Role '{requester_role}' is not permitted to modify grades."
-        }
-
-    # 2. Server-side Validation
-    if not (0.0 <= new_grade <= 100.0):
-        return {
-            "status": "error",
-            "message": "Invalid grade. Grade must be between 0.0 and 100.0."
-        }
-
-    if student_id <= 0 or course_id <= 0:
-        return {
-            "status": "error",
-            "message": "Student ID and Course ID must be positive integers."
-        }
 
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
-        # 3. Check if enrollment exists
+        cursor.execute("SELECT role FROM students WHERE email = ?", (requester_email,))
+        requester = cursor.fetchone()
+
+        if not requester:
+            return {
+                "status": "error",
+                "message": f"Requester '{requester_email}' not found. Authorization denied."
+            }
+
+        requester_role = requester["role"]
+        if requester_role not in allowed_roles:
+            return {
+                "status": "error",
+                "message": f"Authorization denied. Role '{requester_role}' is not permitted to modify grades."
+            }
+
+        if not (0.0 <= new_grade <= 100.0):
+            return {
+                "status": "error",
+                "message": "Invalid grade. Grade must be between 0.0 and 100.0."
+            }
+
+        if student_id <= 0 or course_id <= 0:
+            return {
+                "status": "error",
+                "message": "Student ID and Course ID must be positive integers."
+            }
+
         cursor.execute(
             "SELECT enrollment_id FROM enrollments WHERE student_id = ? AND course_id = ?",
             (student_id, course_id)
@@ -266,7 +281,6 @@ def update_student_grade(student_id: int, course_id: int, new_grade: float, requ
                 "message": f"No active enrollment found for Student ID {student_id} in Course ID {course_id}."
             }
 
-        # 4. Perform Update
         cursor.execute(
             "UPDATE enrollments SET grade = ?, status = 'COMPLETED' WHERE student_id = ? AND course_id = ?",
             (new_grade, student_id, course_id)
@@ -290,13 +304,10 @@ def update_student_grade(student_id: int, course_id: int, new_grade: float, requ
 )
 async def generate_academic_report(ctx: Context) -> dict:
     await ctx.report_progress(progress=0, total=100)
-
     await asyncio.sleep(1)
     await ctx.report_progress(30, 100, "Collecting student records...")
-
     await asyncio.sleep(1)
     await ctx.report_progress(70, 100, "Analyzing grades...")
-
     await asyncio.sleep(1)
     await ctx.report_progress(100, 100, "Generating final report...")
 
@@ -320,6 +331,7 @@ async def generate_academic_report(ctx: Context) -> dict:
             "status": "Completed all evaluation steps"
         }
     }
+
 
 
 @mcp.tool(
@@ -494,13 +506,12 @@ def save_learning_goal(
 # Chat history / rolling buffer
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool(
     name="store_message",
-    description="Stores a chat message under a session_id and applies a rolling buffer, "
-                "keeping only the most recent messages per session."
+    description="Stores a chat message under a session_id and applies a rolling buffer."
 )
 def store_message(session_id: str, role: str, content: str, student_id: int = None) -> dict:
-    # 1. Input Validation
     if not session_id or not session_id.strip():
         return {"status": "error", "message": "session_id is required."}
 
@@ -515,14 +526,12 @@ def store_message(session_id: str, role: str, content: str, student_id: int = No
     cursor = conn.cursor()
 
     try:
-        # 2. Insert the new message
         cursor.execute(
             "INSERT INTO messages (session_id, student_id, role, content) VALUES (?, ?, ?, ?)",
             (session_id, student_id, role, content)
         )
         conn.commit()
 
-        # 3. Rolling buffer: trim oldest messages beyond the max per session
         cursor.execute(
             "SELECT COUNT(*) as cnt FROM messages WHERE session_id = ?",
             (session_id,)
@@ -531,13 +540,17 @@ def store_message(session_id: str, role: str, content: str, student_id: int = No
 
         if total > MAX_HISTORY_PER_SESSION:
             excess = total - MAX_HISTORY_PER_SESSION
+            # ملاحظة: created_at بدقة الثانية فقط في SQLite، فلو اتسجلت رسايل
+            # كتير في نفس الثانية، الترتيب بينهم بـ created_at وحده عشوائي
+            # (نفس مشكلة الـ checkpoints بالظبط). بنضيف message_id كـ
+            # tie-breaker ثانوي عشان نضمن مسح الأقدم فعليًا مش أي حد عشوائي.
             cursor.execute(
                 """
                 DELETE FROM messages
                 WHERE message_id IN (
                     SELECT message_id FROM messages
                     WHERE session_id = ?
-                    ORDER BY created_at ASC
+                    ORDER BY created_at ASC, message_id ASC
                     LIMIT ?
                 )
                 """,
@@ -555,8 +568,7 @@ def store_message(session_id: str, role: str, content: str, student_id: int = No
 
 @mcp.tool(
     name="get_chat_history",
-    description="Returns the stored chat history for a session as an ordered list of "
-                "messages (role/content), ready to use as MCP sampling input."
+    description="Returns the stored chat history for a session."
 )
 def get_chat_history(session_id: str, limit: int = MAX_HISTORY_PER_SESSION) -> dict:
     if not session_id or not session_id.strip():
@@ -572,7 +584,7 @@ def get_chat_history(session_id: str, limit: int = MAX_HISTORY_PER_SESSION) -> d
         """
         SELECT role, content, created_at FROM messages
         WHERE session_id = ?
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, message_id DESC
         LIMIT ?
         """,
         (session_id, limit)
@@ -580,9 +592,7 @@ def get_chat_history(session_id: str, limit: int = MAX_HISTORY_PER_SESSION) -> d
     rows = cursor.fetchall()
     conn.close()
 
-    # Reverse back to chronological order (oldest -> newest)
     rows = list(reversed(rows))
-
     messages = [{"role": row["role"], "content": row["content"]} for row in rows]
 
     return {
@@ -613,15 +623,12 @@ def clear_chat_history(session_id: str) -> dict:
 
 @mcp.tool(
     name="request_student_evaluation",
-    description="Requests the client model to evaluate a student's academic standing based on "
-                "their grades using sampling, with conversation history kept in a session-based "
-                "rolling buffer."
+    description="Requests the client model to evaluate a student's academic standing."
 )
 async def request_student_evaluation(student_id: int, session_id: str, ctx: Context) -> dict:
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Get student information
     cursor.execute(
         "SELECT name, email FROM students WHERE student_id = ?",
         (student_id,)
@@ -635,7 +642,6 @@ async def request_student_evaluation(student_id: int, session_id: str, ctx: Cont
             "message": f"Student ID {student_id} not found."
         }
 
-    # Get enrolled courses
     query = """
          SELECT c.title, e.grade, e.status
          FROM enrollments e
@@ -646,7 +652,6 @@ async def request_student_evaluation(student_id: int, session_id: str, ctx: Cont
     courses = cursor.fetchall()
     conn.close()
 
-    # Build the evaluation request as a message
     course_details = ""
     for course in courses:
         course_details += (
@@ -676,16 +681,13 @@ async def request_student_evaluation(student_id: int, session_id: str, ctx: Cont
     Keep the response concise and professional.
     """
 
-    # 1. Persist this turn in the session's rolling buffer
     store_message(session_id=session_id, role="user", content=user_prompt, student_id=student_id)
 
-    # 2. Pull the session's history back out as a proper list of messages
     response = await ctx.sample(
-    messages=user_prompt,
-    max_tokens=150
+        messages=user_prompt,
+        max_tokens=150
     )
 
-    # 4. Persist the assistant's reply too, so the next call continues the same session
     store_message(session_id=session_id, role="assistant", content=response.text, student_id=student_id)
 
     return {
@@ -694,6 +696,10 @@ async def request_student_evaluation(student_id: int, session_id: str, ctx: Cont
         "evaluation": response.text
     }
 
+
+# ======================================================
+# Server Execution
+# ======================================================
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "http":
