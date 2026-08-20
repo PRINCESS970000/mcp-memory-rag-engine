@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  brightpeak-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: brightpeak_mcp_app
+    ports:
+      - "8000:8000"
+    volumes:
+      # ربط مجلد db للحفاظ على أي تحديثات تحدث على قاعدة البيانات داخل الحاوية
+      - ./db:/app/db
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
