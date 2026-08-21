@@ -1,14 +1,12 @@
 import os
 import chromadb
  
-from chunk_schema import PolicyChunk
- 
-# 
+# ⚠️ استبدلي دول بالقيم الفعلية اللي صاحبتك مستخدماها في مخزن الـ RAG
 CHROMA_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "chroma_store")
 COLLECTION_NAME = "brightpeak_policies"
-
-
-SCHOLARSHIP_POLICY_TYPE = "scholarship_eligibility"
+ 
+# نفس filter مبني على policy_type -- عدّلناها هنا لسياسات التخرج بدل المنح
+SCHOLARSHIP_POLICY_TYPE = "graduation_policy"
  
  
 def retrieve_scholarship_policy(query: str, top_k: int = 3) -> str:
@@ -36,5 +34,6 @@ def retrieve_scholarship_policy(query: str, top_k: int = 3) -> str:
         return "\n---\n".join(documents)
  
     except Exception:
-     
+        # فشل الاتصال بمخزن الـ RAG مش سبب كافي نوقف طلب المنحة كله --
+        # بيرجع فاضي والـ node بيكمل من غير سياق سياسة (ويُسجَّل في اللوج).
         return ""

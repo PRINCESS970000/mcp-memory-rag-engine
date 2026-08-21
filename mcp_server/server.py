@@ -9,7 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from state_graph.base import init_checkpointing_tables
 
 mcp = FastMCP("Brightpeak Academy Server")
-import scholarship_tools
+
 
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "db", "brightpeak.db"))
 
@@ -21,6 +21,10 @@ def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+import graduation_tools
+graduation_tools.register(mcp, get_db_connection)
+
 
 
 def init_messages_table():

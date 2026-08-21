@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>Brightpeak Admin Dashboard</title>
+<style>
+  body { font-family: sans-serif; background: #0f1115; color: #e6e6e6; padding: 24px; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 16px; margin-top: 32px; border-bottom: 1px solid #333; padding-bottom: 8px; }
+  .card {
+    background: #1a1d24; border: 1px solid #2a2d34; border-radius: 8px;
+    padding: 16px; margin-bottom: 12px;
+  }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+  .badge-graph { background: #2b3a55; color: #8fb4ff; }
+  .reason { margin: 8px 0; }
+  .details { font-size: 13px; color: #999; white-space: pre-wrap; }
+  button {
+    padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer;
+    margin-inline-end: 8px; font-size: 13px;
+  }
+  .approve { background: #2e7d4f; color: white; }
+  .reject { background: #a3403f; color: white; }
+  .resolve { background: #3a6ea5; color: white; }
+  .empty { color: #666; font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>Brightpeak</h1>
+<h2>(HITL)</h2>
+<div id="hitl-list"><p class="empty">loading..</p></div>
+
+<h2>(Tickets)</h2>
+<div id="tickets-list"><p class="empty">loading.</p></div>
+
+<script>
+async function loadHitl() {
+  const res = await fetch('/api/hitl');
+  const tasks = await res.json();
+  const container = document.getElementById('hitl-list');
+  container.innerHTML = '';
+
+  if (tasks.length === 0) {
+    container.innerHTML = '<p class="empty">مفيش مهام معلقة دلوقتي.</p>';
+    return;
+  }
+
+  for (const task of tasks) {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `
+      <span class="badge badge-graph">${task.graph_type || 'unknown'}</span>
+      <span style="color:#666; font-size:12px;">thread: ${task.thread_id}</span>
+      <p class="reason">${task.reason}</p>
+      <div class="details">${JSON.stringify(task.details, null, 2)}</div>
+      <div style="margin-top:12px;">
+        <button class="approve" onclick="resolveHitl(${task.id}, true)">اعتماد</button>
+        <button class="reject" onclick="resolveHitl(${task.id}, false)">رفض</button>
+      </div>
+    `;
+    container.appendChild(div);
+  }
+}
+
+async function resolveHitl(id, approved) {
+  const res = await fetch(`/api/hitl/${id}/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ approved })
+  });
+  if (!res.ok) {
+    alert( 'eror when loading' + (await res.text()));
+    return;
+  }
+  await loadHitl();
+  await loadTickets();
+}
+
+async function loadTickets() {
+  const res = await fetch('/api/tickets');
+  const tickets = await res.json();
+  const container = document.getElementById('tickets-list');
+  container.innerHTML = '';
+
+  if (tickets.length === 0) {
+    container.innerHTML = '<p class="empty">No open tickets at the moment.</p>';
+    return;
+  }
+
+  for (const ticket of tickets) {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `
+      <span class="badge badge-graph">${ticket.graph_type || 'unknown'}</span>
+      <span style="color:#666; font-size:12px;">thread: ${ticket.thread_id} -- node: ${ticket.node_name}</span>
+      <p class="reason">${ticket.error_message}</p>
+      <div style="margin-top:12px;">
+        <button class="resolve" onclick="resolveTicket(${ticket.id})">run</button>
+      </div>
+    `;
+    container.appendChild(div);
+  }
+}
+
+async function resolveTicket(id) {
+  const res = await fetch(`/api/tickets/${id}/resolve`, { method: 'POST' });
+  if (!res.ok) {
+    alert('Error when loading' + (await res.text()));
+    return;
+  }
+  await loadHitl();
+  await loadTickets();
+}
+
+loadHitl();
+loadTickets();
+</script>
+
+</body>
+</html>
