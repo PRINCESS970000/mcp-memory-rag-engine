@@ -22,7 +22,7 @@ from enum import Enum
 import state_graph.base as base
 from state_graph.mcp_client import call_mcp_tool
 from state_graph.rag_client import retrieve_scholarship_policy  # نفس الدالة العامة، هنمررلها سؤال مختلف
-
+from state_graph.tickets.dedupe import create_ticket_if_not_open # نفس الدالة العامة، هنمررلها سؤال مختلف
 
 # ---------------------------------------------------------------------------
 # 1) الحالات والـ state
@@ -312,7 +312,7 @@ async def run_graduation_graph(
             return state
 
         if "_ticket_error" in update:
-            ticket_id = base.create_failure_ticket(thread_id, current_node, update["_ticket_error"])
+            ticket_id = create_ticket_if_not_open(thread_id, current_node, update["_ticket_error"])
             state["pending_ticket_id"] = ticket_id
             base.save_checkpoint(thread_id, current_node, dict(state))
             print(f">>> Paused due to ticket #{ticket_id}")

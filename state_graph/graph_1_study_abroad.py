@@ -34,8 +34,12 @@ from state_graph.base import (
     load_latest_checkpoint,
     create_hitl_task,
     get_latest_hitl_task,
-    create_failure_ticket,
 )
+# Dedupe wrapper instead of base.create_failure_ticket directly -- avoids
+# opening a fresh ticket every time the same failure is hit again on
+# resume/redirect (found while testing the internship graph, same
+# runner pattern applies here).
+from state_graph.tickets.dedupe import create_ticket_if_not_open
 
 try:
     from client import call_mcp_tool
@@ -54,6 +58,13 @@ except ImportError:
 
 
 MAX_PREFERENCE_ATTEMPTS = 3  # safety guard against an infinite loop if every option gets rejected
+
+# Shared thread_id prefix convention across all 3 graphs
+# (study_abroad- / graduation- / internship-). This graph didn't
+# generate its own thread_id before, so run_or_resume_graph now
+# normalizes it below rather than requiring every caller to remember
+# the prefix themselves.
+THREAD_PREFIX = "study_abroad-"
 
 
 # ======================================================
@@ -140,7 +151,7 @@ def lats_search_node(state: dict) -> dict:
         return state
     except Exception as e:
         state["status"] = "failed"
-        create_failure_ticket(tid, "lats_search_node", f"LATS Error: {str(e)}")
+        create_ticket_if_not_open(tid, "lats_search_node", f"LATS Error: {str(e)}")
         save_checkpoint(tid, "lats_search_node", state)
         return state
 
@@ -166,7 +177,7 @@ def constrained_react_validation_node(state: dict) -> dict:
         return state
     except Exception as e:
         state["status"] = "failed"
-        create_failure_ticket(tid, "constrained_react_validation_node", f"Validation Error: {str(e)}")
+        create_ticket_if_not_open(tid, "constrained_react_validation_node", f"Validation Error: {str(e)}")
         save_checkpoint(tid, "constrained_react_validation_node", state)
         return state
 
@@ -187,7 +198,7 @@ def submit_application_node(state: dict) -> dict:
         return state
     except Exception as e:
         state["status"] = "failed"
-        create_failure_ticket(tid, "submit_application_node", f"Submit Error: {str(e)}")
+        create_ticket_if_not_open(tid, "submit_application_node", f"Submit Error: {str(e)}")
         save_checkpoint(tid, "submit_application_node", state)
         return state
 
@@ -339,6 +350,14 @@ TERMINAL_OR_PAUSE_STATES = {"finalized", "failed", "no_more_options"}
 
 
 def run_or_resume_graph(thread_id: str, student_email: str = "omar.k@brightpeak.edu") -> dict:
+    # Normalize to the shared prefix convention regardless of what the
+    # caller passed in -- old un-prefixed threads (e.g. demo scripts using
+    # arbitrary names) get the prefix added the first time they're touched
+    # after this change, rather than requiring every call site to be
+    # updated by hand.
+    if not thread_id.startswith(THREAD_PREFIX):
+        thread_id = f"{THREAD_PREFIX}{thread_id}"
+
     checkpoint = load_latest_checkpoint(thread_id)
     if checkpoint:
         print(f"Resuming thread '{thread_id}' from status: {checkpoint.get('status')}")
