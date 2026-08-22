@@ -1,11 +1,10 @@
 from typing import TypedDict, Optional
 from enum import Enum
 import os
- 
-import base
-from mcp_client import call_mcp_tool
-from rag_client import retrieve_scholarship_policy
- 
+
+import state_graph.base as base
+from state_graph.mcp_client import call_mcp_tool
+from state_graph.rag_client import retrieve_scholarship_policy
  
 # ---------------------------------------------------------------------------
 # 1) تعريف الحالات والـ state

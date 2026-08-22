@@ -11,7 +11,7 @@
     ],
     "attempts": 2,
     "final_score": 0.1667,
-    "latency_s": 0.002,
+    "latency_s": 0.0,
     "details": [
       "Course 2 requires course 6, which is neither completed nor included in the path.",
       "Course 2 requires course 7, which is neither completed nor included in the path.",
@@ -31,24 +31,22 @@
       1,
       3,
       4,
-      6,
-      7,
       14
     ],
     "num_trials": 3,
     "final_score": 0.5,
     "reflections": [
-      "I overloaded the schedule with overlapping courses that exceeded both weekly hour limits and prerequisites, while also missing the target completion date. Next time, I'll prioritize non-overlapping courses with lighter loads, ensure all prerequisites are met before starting dependent courses, and select a shorter path that finishes by the deadline.",
-      "I overloaded the schedule with conflicting courses that exceeded both weekly hour limits and prerequisite constraints, so next I\u2019ll select fewer courses (e.g., dropping 3, 4, 7, 14) and space them to fit within 8 hours while ensuring prerequisites finish before successors start.",
-      "I overloaded the schedule by selecting too many high-hour courses that clashed simultaneously, while ignoring prerequisite sequencing. Next, I\u2019ll prioritize fewer courses (e.g., drop 3, 4, 6, 14, and 7) and add lighter, non-overlapping alternatives like \"Introduction to Data Science\" (course 10) to stay under the 8-hour limit and respect prerequisites."
+      "I overloaded the schedule with too many high-overlap courses and ignored prerequisite sequencing and budget constraints; next, I'll prioritize non-overlapping courses, space them out, and ensure prerequisites are completed before dependent courses start, while strictly adhering to the 500-hour budget.",
+      "I overloaded my schedule by selecting too many high-contact-hour courses that clashed weekly and scheduled some before their prerequisites were completed, so next I\u2019ll drop courses 3, 4, and 14, keep only course 1, and add a single low-contact-hour course that has no prerequisites and starts after 2026-10-13.",
+      "I overloaded the schedule with conflicting courses that exceeded both weekly hour limits and prerequisite constraints, so next I\u2019ll prioritize a lighter selection like [1, 6, 4] while ensuring Course 4 starts after Course 1 ends and all weekly hours stay under 8."
     ],
     "metrics": {
       "algorithm": "Reflexion",
       "llm_calls": 6,
-      "prompt_tokens": 4287,
-      "completion_tokens": 291,
-      "total_tokens": 4578,
-      "latency_seconds": 8.433,
+      "prompt_tokens": 4195,
+      "completion_tokens": 261,
+      "total_tokens": 4456,
+      "latency_seconds": 15.131,
       "status": "failed"
     }
   }

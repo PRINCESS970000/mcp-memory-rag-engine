@@ -1,0 +1,17 @@
+body { font-family: Tahoma, sans-serif; background: #f4f5f7; margin: 0; }
+.app { max-width: 800px; margin: 0 auto; padding: 16px; }
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.panel { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.hidden { display: none; }
+.chat-log { height: 300px; overflow-y: auto; border: 1px solid #eee; padding: 8px; margin-bottom: 8px; }
+.chat-log .msg { margin: 6px 0; padding: 8px; border-radius: 6px; }
+.chat-log .user { background: #e3f2fd; text-align: left; }
+.chat-log .assistant { background: #f1f8e9; }
+.chat-input-row { display: flex; gap: 8px; }
+.chat-input-row input[type=text] { flex: 1; }
+input, select, button { padding: 8px; border-radius: 6px; border: 1px solid #ccc; }
+button { background: #1976d2; color: #fff; border: none; cursor: pointer; }
+.graph-form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.graph-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.output-box { background: #263238; color: #b2ff59; padding: 12px; border-radius: 6px; max-height: 300px; overflow: auto; }
+.hitl-item, .ticket-item { border: 1px solid #eee; padding: 8px; margin-bottom: 6px; border-radius: 6px; }

@@ -2,12 +2,14 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))                  # <-- جديد: يضيف agent/ نفسها (لازم تبقى أول واحدة)
 sys.path.insert(0, str(Path(__file__).parent.parent / "memory"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "rag"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "context_eval"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "mcp_server"))
 
-from intent_router import route_intent          # agent/intent_router.py (renamed)
+from intent_router import route_intent 
+        
 
 # --- memory system ---
 from short_term import ShortTermMemory           # buffer + scratchpad, combined
@@ -51,6 +53,36 @@ def handle_message(stm: ShortTermMemory, student_id: int, message: str) -> dict:
 
     return result
 
+
+def _run_policy_search_and_verify(collection, bm25_index, chunks, question: str) -> dict:
+    """
+    One full retrieve -> generate -> verify pass. Factored out so
+    _handle_policy_question can call it twice (original query, then
+    once more with a reformulated query) without duplicating the logic
+    -- this is the grounded-retry pattern from rag/grounded_reflect.py,
+    wired against the real, already-live offline pipeline
+    (generate_local.py / agentic_rag_search) instead of that file's
+    Anthropic-only stand-in, since no API credits are available here.
+    """
+    retrieved, reasoning_log = agentic_rag_search(collection, bm25_index, chunks, question)
+    retrieved_chunks = [c for c, _score in retrieved]
+
+    raw_answer = generate_answer_extractive(question, retrieved_chunks)
+    relevance_passed, relevance_reason = _check_agentic_relevance(retrieved)
+    support_passed, support_reason = check_support_extractive(raw_answer, retrieved_chunks)
+
+    return {
+        "retrieved": retrieved,
+        "reasoning_log": reasoning_log,
+        "raw_answer": raw_answer,
+        "relevance_passed": relevance_passed,
+        "relevance_reason": relevance_reason,
+        "support_passed": support_passed,
+        "support_reason": support_reason,
+        "passed": relevance_passed and support_passed,
+    }
+
+
 def _handle_policy_question(question: str) -> dict:
     """
     Uses agentic RAG for retrieval (winner per retrieval_eval's comparison
@@ -61,25 +93,39 @@ def _handle_policy_question(question: str) -> dict:
     for the real versions once either is available -- no other code
     in this function needs to change, since both share the same
     (question, chunks) -> answer / (answer, chunks) -> (bool, reason) shape.
+
+    Bounded retry (exactly ONE, matching rag/grounded_reflect.py's
+    documented retry-once policy): if the first pass fails relevance or
+    support, reformulate the question using the failure reason(s) and
+    search again exactly once before giving up and flagging [UNVERIFIED].
     """
     client = get_client()
     collection = get_or_create_collection(client)
     bm25_index, chunks = build_bm25_index()
 
-    retrieved, reasoning_log = agentic_rag_search(collection, bm25_index, chunks, question)
-    retrieved_chunks = [c for c, _score in retrieved]
+    attempt = _run_policy_search_and_verify(collection, bm25_index, chunks, question)
+    retried = False
 
-    raw_answer = generate_answer_extractive(question, retrieved_chunks)
-    relevance_passed, relevance_reason = _check_agentic_relevance(retrieved)
-    support_passed, support_reason = check_support_extractive(raw_answer, retrieved_chunks)
+    if not attempt["passed"]:
+        reasons = []
+        if not attempt["relevance_passed"]:
+            reasons.append(attempt["relevance_reason"])
+        if not attempt["support_passed"]:
+            reasons.append(attempt["support_reason"])
 
-    passed = relevance_passed and support_passed
+        retry_query = f"{question} (be more specific: {'; '.join(reasons)})"
+        retried = True
+        attempt = _run_policy_search_and_verify(collection, bm25_index, chunks, retry_query)
+
+    passed = attempt["passed"]
+    raw_answer = attempt["raw_answer"]
+
     if not passed:
         reasons = []
-        if not relevance_passed:
-            reasons.append(f"relevance check failed: {relevance_reason}")
-        if not support_passed:
-            reasons.append(f"support check failed: {support_reason}")
+        if not attempt["relevance_passed"]:
+            reasons.append(f"relevance check failed: {attempt['relevance_reason']}")
+        if not attempt["support_passed"]:
+            reasons.append(f"support check failed: {attempt['support_reason']}")
         final_answer = (
             "[UNVERIFIED — do not trust this answer without human review]\n"
             f"Reason(s): {'; '.join(reasons)}\n\nOriginal answer: {raw_answer}"
@@ -91,12 +137,14 @@ def _handle_policy_question(question: str) -> dict:
         "answer": final_answer,
         "verification": {
             "passed": passed,
-            "relevance_reason": relevance_reason,
-            "support_reason": support_reason,
+            "relevance_reason": attempt["relevance_reason"],
+            "support_reason": attempt["support_reason"],
+            "retried": retried,
         },
-        "retrieval_reasoning_log": reasoning_log,
-        "retrieved_chunk_ids": [c.chunk_id for c, _score in retrieved],
+        "retrieval_reasoning_log": attempt["reasoning_log"],
+        "retrieved_chunk_ids": [c.chunk_id for c, _score in attempt["retrieved"]],
     }
+
 
 def _handle_planning_question(student_id: int, message: str) -> dict:
     """
@@ -198,7 +246,7 @@ def _check_agentic_relevance(retrieved: list) -> tuple[bool, str]:
             f"Top result ({top_chunk.chunk_id}) scored {top_score:.4f} (RRF scale), "
             f"below the floor of {AGENTIC_RELEVANCE_FLOOR}."
         )
-    return True, f"Top result ({top_chunk.chunk_id}) scored {top_score:.4f} (RRF scale), above floor."  
+    return True, f"Top result ({top_chunk.chunk_id}) scored {top_score:.4f} (RRF scale), above floor."
 
 def _get_student_email(student_id: int) -> str | None:
     """
@@ -252,7 +300,7 @@ def _handle_db_tool_question(student_id: int, question: str) -> dict:
     else:
         answer = f"Student: {data['name']} ({data['email']}), role: {data['role']}"
 
-    return {"answer": answer, "db_source": "get_student_profile"}  
+    return {"answer": answer, "db_source": "get_student_profile"}
 
 if __name__ == "__main__":
     session_id = "demo_session"

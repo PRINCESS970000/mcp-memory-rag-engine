@@ -1,25 +1,33 @@
 """
-Option B starter: answer_with_grounding_check
+Option B: answer_with_grounding_check
 
-Adds one guardrail on top of your EXISTING search_knowledge_base tool:
+Adds one guardrail on top of the existing search_knowledge_base tool:
 before returning an answer, check it's actually backed by the retrieved
 chunks, and retry the search exactly ONCE if it isn't.
 
-WHAT YOU NEED TO DO (look for "TODO"):
-  1. Replace call_llm() with your real LLM client call.
-  2. Replace search_knowledge_base() with an import of your real MCP tool.
-  3. Call answer_with_grounding_check() wherever your agent currently
-     generates a final answer from retrieved chunks.
+STATUS: the three TODOs from the original starter version are resolved
+below -- RealLLM wraps rag/generate.py's real Anthropic client, and
+real_search_knowledge_base wraps rag/agentic_rag.py's real retrieval
+(the winning architecture per retrieval_eval's comparison table).
 
-This file runs on its own with fake stand-ins so you can see the shape of
-the flow before touching your real server.
+NOTE: this module still isn't the live path for policy questions in
+agent/loop.py, because it depends on the Anthropic API (no credits in
+this environment -- see generate_local.py). The retry-once PATTERN
+demonstrated here is wired into the actual live pipeline in
+agent/loop.py's _handle_policy_question, using the offline extractive
+components instead. Once API credits are available, call
+answer_with_grounding_check(query, real_search_knowledge_base, RealLLM())
+directly from _handle_policy_question instead of the offline path.
 
-NOTE: the retry cap here is hardcoded to 1. That's intentional for this
-assignment -- proper bounded-retry / stopping-criteria policy is next
-week's material, this is just enough to see the pattern.
+NOTE: the retry cap here is hardcoded to 1, intentionally -- proper
+bounded-retry / stopping-criteria policy is separate, later material.
 """
 
+import sys
 from dataclasses import dataclass
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
 
 
 # ---------------------------------------------------------------------------
@@ -111,12 +119,49 @@ def answer_with_grounding_check(query: str, search_tool, llm, top_k: int = 3) ->
     return "I couldn't find a grounded answer to this in the knowledge base."
 
 
+# ---------------------------------------------------------------------------
+# Real implementations (TODOs resolved)
+# ---------------------------------------------------------------------------
 
-# Fake stand-ins so this file runs standalone (swap these out for real ones)
+class RealLLM:
+    """Wraps rag/generate.py's real Anthropic client to match this
+    module's llm.complete(prompt) -> str shape. Requires ANTHROPIC_API_KEY
+    with available credits in the repo root .env."""
+
+    def complete(self, prompt: str) -> str:
+        from generate import client, MODEL
+
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text
+
+
+def real_search_knowledge_base(query: str, top_k: int = 3):
+    """Wraps rag/agentic_rag.py's real retrieval (winner per
+    retrieval_eval's comparison table) to match this module's
+    search_tool(query, top_k) -> list[(text, score)] shape."""
+    from agentic_rag import agentic_rag_search
+    from vector_store import get_client, get_or_create_collection
+    from hybrid_rag import build_bm25_index
+
+    vs_client = get_client()
+    collection = get_or_create_collection(vs_client)
+    bm25_index, chunks = build_bm25_index()
+
+    retrieved, _reasoning_log = agentic_rag_search(
+        collection, bm25_index, chunks, query, n_results=top_k
+    )
+    return [(chunk.text, score) for chunk, score in retrieved]
+
+
+# ---------------------------------------------------------------------------
+# Fake stand-ins kept for the standalone demo below (no API key needed)
+# ---------------------------------------------------------------------------
 
 class FakeLLM:
-    """TODO: replace with your real LLM client (e.g. an Anthropic/OpenAI wrapper)."""
-
     def __init__(self):
         self._calls = 0
 
@@ -124,7 +169,6 @@ class FakeLLM:
         self._calls += 1
         if prompt.startswith("Answer the question"):
             if "pet grooming" in prompt.lower():
-                # first draft: ungrounded guess (chunk didn't actually cover this)
                 if self._calls <= 2:
                     return "We offer free pet grooming with every booking."
                 return "We don't offer pet grooming; only boarding and daycare are covered."
@@ -136,7 +180,6 @@ class FakeLLM:
 
 
 def fake_search_knowledge_base(query: str, top_k: int = 3):
-    """TODO: replace with an import of your real search_knowledge_base tool."""
     fake_kb = {
         "does the company offer pet grooming?": [
             ("We offer overnight boarding and daytime daycare for pets.", 0.62),

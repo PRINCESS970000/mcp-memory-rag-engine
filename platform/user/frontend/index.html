@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <title>BrightPeak — User Platform</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>BrightPeak Platform</h1>
+      <select id="agentSwitcher"></select>
+    </header>
+
+    <!-- Chat panel: memory/RAG/planning agent -->
+    <section id="chatPanel" class="panel">
+      <div id="chatLog" class="chat-log"></div>
+      <div class="chat-input-row">
+        <input id="studentIdChat" type="number" placeholder="student_id" value="7" />
+        <input id="chatInput" type="text" placeholder="اكتبي سؤالك..." />
+        <button id="sendChat">إرسال</button>
+      </div>
+    </section>
+
+    <!-- Graph panel: state-graph agents -->
+    <section id="graphPanel" class="panel hidden">
+      <div class="graph-form" id="graphFormFields"></div>
+      <div class="graph-actions">
+        <button id="graphStart">Start</button>
+        <input id="threadIdInput" type="text" placeholder="thread_id (بعد أول Start)" />
+        <button id="graphResume">Resume</button>
+      </div>
+      <pre id="graphOutput" class="output-box"></pre>
+    </section>
+
+    <!-- Admin-lite: HITL + tickets -->
+    <section class="panel">
+      <h3>HITL Tasks (Pending)</h3>
+      <div id="hitlList"></div>
+      <h3>Open Tickets</h3>
+      <div id="ticketList"></div>
+      <button id="refreshAdmin">تحديث</button>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

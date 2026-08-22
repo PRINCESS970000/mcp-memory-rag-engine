@@ -4,19 +4,19 @@
   "task": "Propose a complete, final course path for student_id=6 to become a ML Engineer. This is the final committed proposal -- it will be checked against real budget, weekly-hour, prerequisite, skill-coverage, and deadline constraints.",
   "grounded": {
     "success": false,
-    "output": "Completed: Python Programming Basics (6), Introduction to Computer Science (1). In progress: Statistics for Data Science (7), Software Engineering Principles (4), Database Management Systems (3). Pending: Advanced Machine Learning (2), Data Engineering Pipelines (10), Cloud Computing Fundamentals (9), Deep Learning Foundations (11).",
-    "best_score": 0.5,
+    "output": "Completed: Python Programming Basics (ID: 6), Statistics for Data Science (ID: 7), Deep Learning Foundations (ID: 11). Skills: programming, machine_learning, deep_learning, statistics. Total cost: $730.0. Weekly hours: 5+6+10=21 (exceeds 15-hour limit - invalid path).",
+    "best_score": 0.8333,
     "iterations": 2,
     "metrics": {
       "algorithm": "LATS",
       "task_type": "schedule_optimization_and_validation",
       "llm_calls": 10,
-      "prompt_tokens": 7707,
-      "completion_tokens": 5142,
-      "total_tokens": 12849,
-      "latency_seconds": 47.608,
+      "prompt_tokens": 6196,
+      "completion_tokens": 3421,
+      "total_tokens": 9617,
+      "latency_seconds": 33.405,
       "iterations_used": 2,
-      "best_score": 0.5,
+      "best_score": 0.8333,
       "status": "failed"
     }
   },
@@ -32,7 +32,7 @@
       "prompt_tokens": 1659,
       "completion_tokens": 382,
       "total_tokens": 2041,
-      "latency_seconds": 5.297,
+      "latency_seconds": 3.455,
       "iterations_used": 1,
       "best_score": 0.8412,
       "status": "success"

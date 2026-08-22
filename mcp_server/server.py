@@ -9,7 +9,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from state_graph.base import init_checkpointing_tables
 
 mcp = FastMCP("Brightpeak Academy Server")
-import scholarship_tools
 
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "db", "brightpeak.db"))
 
@@ -540,10 +539,6 @@ def store_message(session_id: str, role: str, content: str, student_id: int = No
 
         if total > MAX_HISTORY_PER_SESSION:
             excess = total - MAX_HISTORY_PER_SESSION
-            # ملاحظة: created_at بدقة الثانية فقط في SQLite، فلو اتسجلت رسايل
-            # كتير في نفس الثانية، الترتيب بينهم بـ created_at وحده عشوائي
-            # (نفس مشكلة الـ checkpoints بالظبط). بنضيف message_id كـ
-            # tie-breaker ثانوي عشان نضمن مسح الأقدم فعليًا مش أي حد عشوائي.
             cursor.execute(
                 """
                 DELETE FROM messages
@@ -700,6 +695,13 @@ async def request_student_evaluation(student_id: int, session_id: str, ctx: Cont
 # ======================================================
 # Server Execution
 # ======================================================
+
+# الاستيراد هنا، في آخر الملف، بعد ما get_db_connection وكل الأدوات
+# المشتركة معرّفة بالفعل -- بيتفادى circular import كان بيحصل لما
+# scholarship_tools.py / internship_tools.py بيحاولوا يعملوا
+# "from server import get_db_connection" وهي لسه مانتعرّفتش.
+import scholarship_tools
+import internship_tools
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "http":

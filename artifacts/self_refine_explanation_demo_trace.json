@@ -5,15 +5,15 @@
   "grounded_issues_found": [
     "Draft doesn't state the correct total cost ($240.00); numbers mentioned: [390.0]."
   ],
-  "ungrounded_critique": "Here\u2019s the review of the draft against the rubric:\n\n1. **Clarity**: The explanation lacks clarity because the total cost mentioned ($390.0) does not match the ground truth ($240.0), which could confuse students about the actual financial commitment.\n2. **Encouraging Tone**: The tone is neutral but not explicitly discouraging. However, the inconsistency in cost may undermine confidence in the recommendation.\n3. **Timeline**: The draft does not mention any timeline for completing the courses or becoming a Data Scientist.\n\n**Result**: FAIL",
-  "revised": "To become a Data Scientist, I recommend starting with **Statistics for Data Science**, which costs **$120**, and **Business Communication for Tech Teams**, which costs **$120**. Together, these courses total **$240** and will build your foundational skills in data analysis and effective communication\u2014both essential for a Data Scientist.",
+  "ungrounded_critique": "- Clarity: The explanation lacks clarity as it does not specify the timeline for completing these courses or becoming a Data Scientist. Additionally, the cost mentioned ($390.00) does not match the ground truth ($240.00).\n- Encouraging tone: The tone is neutral and does not particularly encourage or motivate the student.\n- Timeline: The explanation does not mention the timeline.\n\nPASS",
+  "revised": "To become a Data Scientist, I recommend starting with **Statistics for Data Science**, followed by **Business Communication for Tech Teams**. Together, these two courses cost **$240.00** and will help you build the essential skills needed for your journey.\n\nThis path provides a strong foundation to grow your expertise and confidence as you prepare for a career in data science!",
   "metrics": {
     "algorithm": "Self-Refine",
     "llm_calls": 2,
-    "prompt_tokens": 432,
-    "completion_tokens": 194,
-    "total_tokens": 626,
-    "latency_seconds": 3.863,
+    "prompt_tokens": 401,
+    "completion_tokens": 165,
+    "total_tokens": 566,
+    "latency_seconds": 2.265,
     "status": "success"
   }
 }

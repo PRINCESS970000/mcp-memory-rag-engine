@@ -8,42 +8,43 @@
       "tasks": [
         {
           "id": "t1",
-          "instruction": "Retrieve student_id=1 profile: completed/enrolled courses, weekly hours available, and budget.",
+          "instruction": "Retrieve student profile for student_id=1 to confirm completed/enrolled courses and current constraints (budget, weekly hours).",
           "depends_on": [],
           "expected_tool": "get_student_profile",
           "category": ""
         },
         {
           "id": "t2",
-          "instruction": "Retrieve skill tags required for the Data Scientist role.",
+          "instruction": "Retrieve skill tags and prerequisites required for the Data Scientist role.",
           "depends_on": [],
           "expected_tool": "get_role_requirements",
-          "category": ""
+          "category": "deterministic_parsing"
         },
         {
           "id": "t3",
-          "instruction": "Search candidate courses matching the Data Scientist skill tags, student budget, and weekly hours capacity.",
+          "instruction": "Search for candidate courses that cover the Data Scientist role's skill tags, within the student's budget and weekly-hour capacity.",
           "depends_on": [
             "t1",
             "t2"
           ],
           "expected_tool": "search_courses",
-          "category": ""
+          "category": "select_courses"
         },
         {
           "id": "t4",
-          "instruction": "Perform gap analysis: compare student profile against role requirements to identify missing skills.",
+          "instruction": "Verify prerequisites for each candidate course identified in t3 are met by the student's completed/enrolled courses.",
           "depends_on": [
             "t1",
-            "t2"
+            "t3"
           ],
-          "expected_tool": null,
+          "expected_tool": "check_prerequisites",
           "category": "deterministic_parsing"
         },
         {
           "id": "t5",
-          "instruction": "Filter candidate courses by prerequisites and sequencing constraints to produce a ranked list of feasible paths.",
+          "instruction": "Filter candidate courses by budget, weekly hours, and prerequisite compliance to produce a feasible course set.",
           "depends_on": [
+            "t1",
             "t3",
             "t4"
           ],
@@ -52,16 +53,16 @@
         },
         {
           "id": "t6",
-          "instruction": "Verify prerequisites for the top-ranked course path are met by the student's completed/enrolled courses.",
+          "instruction": "Rank or sequence the feasible course set from t5 to form a coherent learning path toward the Data Scientist role, respecting logical progression and the student's deadline.",
           "depends_on": [
             "t5"
           ],
-          "expected_tool": "check_prerequisites",
-          "category": ""
+          "expected_tool": null,
+          "category": "select_courses"
         },
         {
           "id": "t7",
-          "instruction": "Select the final course sequence that meets the student's budget, weekly hours, and deadline constraints.",
+          "instruction": "Select the final course to enroll in next, ensuring it aligns with the student's constraints and the planned path.",
           "depends_on": [
             "t6"
           ],
@@ -70,7 +71,7 @@
         },
         {
           "id": "t8",
-          "instruction": "Summarize the final learning path: courses, start/end dates, budget allocation, weekly hours, and deadline feasibility.",
+          "instruction": "Summarize the final learning path, including course order, start/end dates, budget allocation, weekly hours, and deadline compliance for student_id=1.",
           "depends_on": [
             "t7"
           ],
@@ -79,16 +80,16 @@
         }
       ],
       "num_tasks": 8,
-      "latency_seconds": 6.058
+      "latency_seconds": 4.551
     },
     "dynamic": {
       "history": [
         {
-          "task": "Retrieve student profile for student_id=1 to assess current skills, budget, weekly-hour capacity, and deadline constraints.",
+          "task": "get_student_profile",
           "result": "{\"status\": \"success\", \"data\": {\"student_id\": 1, \"name\": \"Omar Khaled\", \"email\": \"omar.k@brightpeak.edu\", \"role\": \"STUDENT\", \"enrolled_courses\": [{\"title\": \"Introduction to Computer Science\", \"grade\": 95.5, \"status\": \"COMPLETED\"}, {\"title\": \"Advanced Machine Learning\", \"grade\": 88.0, \"status\": \"ENROLLED\"}, {\"title\": \"Database Management Systems\", \"grade\": 91.2, \"status\": \"COMPLETED\"}]}}"
         },
         {
-          "task": "Check prerequisites for the 'Advanced Machine Learning' course to ensure Omar is on track for the Data Scientist role.",
+          "task": "check_prerequisites",
           "result": "{\"status\": \"success\", \"eligible\": true, \"missing_prerequisites\": []}"
         },
         {
@@ -96,12 +97,12 @@
           "result": "{\"status\": \"success\", \"count\": 0, \"courses\": []}"
         },
         {
-          "task": "search_courses",
-          "result": "{\"status\": \"success\", \"count\": 0, \"courses\": []}"
+          "task": "get_role_requirements",
+          "result": "{\"status\": \"success\", \"data\": {\"role_id\": 1, \"title\": \"Data Scientist\", \"required_skills\": [\"programming\", \"statistics\", \"machine_learning\", \"sql\", \"data_visualization\"]}}"
         }
       ],
       "num_steps": 4,
-      "latency_seconds": 15.298
+      "latency_seconds": 16.817
     }
   },
   "kareem_dropped_course": {
@@ -113,21 +114,21 @@
       "tasks": [
         {
           "id": "t1",
-          "instruction": "Retrieve student profile for student_id=7 to confirm completed/enrolled courses and current constraints (budget, weekly hours).",
+          "instruction": "Retrieve student_id=7's current profile: completed courses, enrolled courses, weekly hours available, and budget.",
           "depends_on": [],
           "expected_tool": "get_student_profile",
           "category": ""
         },
         {
           "id": "t2",
-          "instruction": "Fetch skill tags and prerequisites required for the Software Engineer role.",
+          "instruction": "Retrieve the skill tags and prerequisites required for the Software Engineer role.",
           "depends_on": [],
           "expected_tool": "get_role_requirements",
           "category": ""
         },
         {
           "id": "t3",
-          "instruction": "Search candidate courses matching the Software Engineer role's skill tags, student's budget, and weekly-hour capacity.",
+          "instruction": "Search for candidate courses that cover the Software Engineer role's skill tags, within the student's budget and weekly-hour capacity.",
           "depends_on": [
             "t1",
             "t2"
@@ -137,7 +138,7 @@
         },
         {
           "id": "t4",
-          "instruction": "Perform gap analysis: compare student's completed courses against role requirements to identify missing skills.",
+          "instruction": "Perform gap analysis: compare student's completed/enrolled courses against role requirements to identify missing skills.",
           "depends_on": [
             "t1",
             "t2"
@@ -147,36 +148,40 @@
         },
         {
           "id": "t5",
-          "instruction": "Rank candidate courses by feasibility (prerequisites, budget, weekly hours) and align with role requirements.",
+          "instruction": "Filter candidate courses from t3 by prerequisites: ensure each course's prerequisites are met by the student's current or planned courses.",
           "depends_on": [
+            "t1",
             "t3",
             "t4"
-          ],
-          "expected_tool": null,
-          "category": "select_courses"
-        },
-        {
-          "id": "t6",
-          "instruction": "Verify prerequisites for the top-ranked course(s) to ensure student meets enrollment criteria.",
-          "depends_on": [
-            "t5"
           ],
           "expected_tool": "check_prerequisites",
           "category": ""
         },
         {
+          "id": "t6",
+          "instruction": "Rank and sequence the filtered courses from t5 into a feasible learning path that respects weekly hours, budget, and any deadline constraints.",
+          "depends_on": [
+            "t5"
+          ],
+          "expected_tool": null,
+          "category": "select_courses"
+        },
+        {
           "id": "t7",
-          "instruction": "Enroll student_id=7 into the selected course(s) after prerequisite verification.",
+          "instruction": "Select the final course to enroll in next, based on the ranked path from t6 and the student's constraints.",
           "depends_on": [
             "t6"
           ],
-          "expected_tool": "enroll_student",
+          "expected_tool": null,
           "category": ""
         },
         {
           "id": "t8",
-          "instruction": "Synthesize the final learning path: summarize courses, deadlines, budget allocation, and weekly-hour commitment for student_id=7.",
+          "instruction": "Summarize the complete learning path: list courses in order, total cost, total weeks, and confirm alignment with the student's budget, weekly hours, prerequisites, and deadline.",
           "depends_on": [
+            "t1",
+            "t2",
+            "t6",
             "t7"
           ],
           "expected_tool": null,
@@ -184,13 +189,17 @@
         }
       ],
       "num_tasks": 8,
-      "latency_seconds": 4.496
+      "latency_seconds": 4.036
     },
     "dynamic": {
       "history": [
         {
-          "task": "get_student_profile",
+          "task": "Retrieve student profile for student_id=7 to understand their current status, budget, weekly-hour capacity, and deadline.",
           "result": "{\"status\": \"success\", \"data\": {\"student_id\": 7, \"name\": \"Kareem Reda\", \"email\": \"kareem.r@brightpeak.edu\", \"role\": \"STUDENT\", \"enrolled_courses\": [{\"title\": \"Introduction to Computer Science\", \"grade\": 45.0, \"status\": \"DROPPED\"}]}}"
+        },
+        {
+          "task": "get_role_requirements",
+          "result": "{\"status\": \"success\", \"data\": {\"role_id\": 2, \"title\": \"Software Engineer\", \"required_skills\": [\"programming\", \"software_engineering\", \"cs_fundamentals\", \"databases\"]}}"
         },
         {
           "task": "check_prerequisites",
@@ -198,15 +207,11 @@
         },
         {
           "task": "search_courses",
-          "result": "{\"status\": \"success\", \"count\": 1, \"courses\": [{\"course_id\": 4, \"title\": \"Software Engineering Principles\", \"instructor_id\": 1, \"credits\": 3, \"price\": 200.0, \"weekly_hours\": 6.0, \"duration_weeks\": 5, \"start_date\": \"2026-09-08\", \"end_date\": \"2026-10-13\", \"difficulty\": \"intermediate\", \"skill_tags\": \"software_engineering\"}]}"
-        },
-        {
-          "task": "get_role_requirements",
-          "result": "{\"status\": \"success\", \"data\": {\"role_id\": 2, \"title\": \"Software Engineer\", \"required_skills\": [\"programming\", \"software_engineering\", \"cs_fundamentals\", \"databases\"]}}"
+          "result": "{\"status\": \"success\", \"count\": 4, \"courses\": [{\"course_id\": 1, \"title\": \"Introduction to Computer Science\", \"instructor_id\": 1, \"credits\": 3, \"price\": 150.0, \"weekly_hours\": 6.0, \"duration_weeks\": 6, \"start_date\": \"2026-09-01\", \"end_date\": \"2026-10-13\", \"difficulty\": \"beginner\", \"skill_tags\": \"programming,cs_fundamentals\"}, {\"course_id\": 3, \"title\": \"Database Management Systems\", \"instructor_id\": 3, \"credits\": 3, \"price\": 250.0, \"weekly_hours\": 8.0, \"duration_weeks\": 6, \"start_date\": \"2026-09-01\", \"end_date\": \"2026-10-13\", \"difficulty\": \"intermediate\", \"skill_tags\": \"databases,sql\"}, {\"course_id\": 4, \"title\": \"Software Engineering Principles\", \"instructor_id\": 1, \"credits\": 3, \"price\": 200.0, \"weekly_hours\": 6.0, \"duration_weeks\": 5, \"start_date\": \"2026-09-08\", \"end_date\": \"2026-10-13\", \"difficulty\": \"intermediate\", \"skill_tags\": \"software_engineering\"}, {\"course_id\": 6, \"title\": \"Python Programming Basics\", \"instructor_id\": 2, \"credits\": 3, \"price\": 100.0, \"weekly_hours\": 5.0, \"duration_weeks\": 4, \"start_date\": \"2026-09-01\", \"end_date\": \"2026-09-29\", \"difficulty\": \"beginner\", \"skill_tags\": \"python,programming\"}]}"
         }
       ],
       "num_steps": 4,
-      "latency_seconds": 11.551
+      "latency_seconds": 15.922
     }
   }
 }
