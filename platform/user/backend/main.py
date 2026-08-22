@@ -35,7 +35,7 @@ from memory.short_term import ShortTermMemory  # same class agent/loop.py uses
 
 # --- state graphs ---
 import state_graph.graph_1_study_abroad as graph_study_abroad
-import state_graph.graph_2_scholarship as graph_scholarship
+import state_graph.graph_2_graduation as graph_graduation
 import state_graph.graph_3_internship as graph_internship
 from state_graph.base import (
     get_db_connection,
@@ -53,8 +53,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory session store for the chat agent (fine for a demo; a real
-# deployment would key this off a persisted session table instead).
 _SESSIONS: dict[str, ShortTermMemory] = {}
 
 
@@ -67,7 +65,7 @@ def _get_session(session_id: str, student_id: int) -> ShortTermMemory:
 AGENTS = [
     {"id": "memory_rag", "name": "Memory / RAG / Planning (chat)", "type": "chat"},
     {"id": "study_abroad", "name": "Study Abroad Graph", "type": "graph"},
-    {"id": "scholarship", "name": "Scholarship Graph", "type": "graph"},
+    {"id": "graduation", "name": "Graduation Clearance Graph", "type": "graph"},
     {"id": "internship", "name": "Internship Graph", "type": "graph"},
 ]
 
@@ -76,10 +74,6 @@ AGENTS = [
 def list_agents():
     return AGENTS
 
-
-# ---------------------------------------------------------------------------
-# Chat agent (memory/RAG/planning)
-# ---------------------------------------------------------------------------
 
 class ChatRequest(BaseModel):
     session_id: str
@@ -94,20 +88,14 @@ def chat(req: ChatRequest):
     return result
 
 
-# ---------------------------------------------------------------------------
-# State-graph agents: start / resume
-# ---------------------------------------------------------------------------
-
 class GraphStartRequest(BaseModel):
-    graph: str  # "study_abroad" | "scholarship" | "internship"
+    graph: str  # "study_abroad" | "graduation" | "internship"
     student_id: int
     # internship
     target_role_title: Optional[str] = None
-    # scholarship
-    requested_amount: Optional[float] = None
-    sponsor_name: Optional[str] = None
-    total_installments: int = 3
-    max_appeals: int = 2
+    # graduation
+    department: Optional[str] = None
+    max_corrections: int = 5
     # study_abroad
     student_email: Optional[str] = None
 
@@ -125,23 +113,17 @@ async def graph_start(req: GraphStartRequest):
         state = await graph_internship.start_new_application(req.student_id, req.target_role_title)
         return {"thread_id": state["thread_id"], "state": state}
 
-    if req.graph == "scholarship":
-        if req.requested_amount is None:
-            raise HTTPException(400, "requested_amount is required for scholarship graph")
-        state = await graph_scholarship.start_new_application(
+    if req.graph == "graduation":
+        if not req.department:
+            raise HTTPException(400, "department is required for graduation graph")
+        state = await graph_graduation.start_new_application(
             student_id=req.student_id,
-            requested_amount=req.requested_amount,
-            sponsor_name=req.sponsor_name,
-            total_installments=req.total_installments,
-            max_appeals=req.max_appeals,
+            department=req.department,
+            max_corrections=req.max_corrections,
         )
         return {"thread_id": state["thread_id"], "state": state}
 
     if req.graph == "study_abroad":
-        # graph_1 has no separate start_new_application: run_or_resume_graph
-        # self-initializes when it finds no checkpoint for the thread_id.
-        # No shared thread_id prefix convention exists for this graph yet
-        # (flagged separately) -- using our own clean one here.
         thread_id = f"study_abroad-{req.student_id}-{uuid.uuid4().hex[:6]}"
         email = req.student_email or "omar.k@brightpeak.edu"
         state = graph_study_abroad.run_or_resume_graph(thread_id, email)
@@ -154,8 +136,8 @@ async def graph_start(req: GraphStartRequest):
 async def graph_resume(req: GraphResumeRequest):
     if req.graph == "internship":
         state = await graph_internship.run_or_resume_graph(req.thread_id)
-    elif req.graph == "scholarship":
-        state = await graph_scholarship.run_or_resume_graph(req.thread_id)
+    elif req.graph == "graduation":
+        state = await graph_graduation.run_or_resume_graph(req.thread_id)
     elif req.graph == "study_abroad":
         state = graph_study_abroad.run_or_resume_graph(req.thread_id)
     else:
@@ -166,19 +148,13 @@ async def graph_resume(req: GraphResumeRequest):
 class ExternalSignalRequest(BaseModel):
     graph: str
     thread_id: str
-    # study_abroad
     preference_index: Optional[int] = None
-    signal: str  # 'approved' | 'rejected' | 'timeout' | 'completed' | 'accepted'
-    signal_type: Optional[str] = None  # internship only: 'course_completion' | 'company_response'
+    signal: str
+    signal_type: Optional[str] = None
 
 
 @app.post("/api/graph/external-signal")
 def set_external_signal(req: ExternalSignalRequest):
-    """
-    Simulates a real-world external response arriving (company/university
-    reply, course completion) -- lets the demo/video trigger the branch
-    without waiting for a real webhook.
-    """
     if req.graph == "study_abroad":
         if req.preference_index is None:
             raise HTTPException(400, "preference_index is required for study_abroad")
@@ -192,10 +168,6 @@ def set_external_signal(req: ExternalSignalRequest):
     return {"status": "ok"}
 
 
-# ---------------------------------------------------------------------------
-# HITL tasks (admin-lite panel)
-# ---------------------------------------------------------------------------
-
 @app.get("/api/hitl/pending")
 def list_pending_hitl():
     conn = get_db_connection()
@@ -208,8 +180,8 @@ def list_pending_hitl():
 
 class HitlDecisionRequest(BaseModel):
     task_id: int
-    decision: str  # 'approved' | 'rejected'
-    graph: str     # which graph this task's thread belongs to, so we know how to resume
+    decision: str
+    graph: str
     thread_id: str
 
 
@@ -222,8 +194,8 @@ async def decide_hitl(req: HitlDecisionRequest):
 
     if req.graph == "internship":
         state = await graph_internship.run_or_resume_graph(req.thread_id)
-    elif req.graph == "scholarship":
-        state = await graph_scholarship.run_or_resume_graph(req.thread_id)
+    elif req.graph == "graduation":
+        state = await graph_graduation.run_or_resume_graph(req.thread_id)
     elif req.graph == "study_abroad":
         state = graph_study_abroad.run_or_resume_graph(req.thread_id)
     else:
@@ -231,10 +203,6 @@ async def decide_hitl(req: HitlDecisionRequest):
 
     return {"thread_id": req.thread_id, "state": state}
 
-
-# ---------------------------------------------------------------------------
-# Failure tickets (includes stagnation tickets from state_graph/tickets/)
-# ---------------------------------------------------------------------------
 
 @app.get("/api/tickets/open")
 def open_tickets():
@@ -250,10 +218,6 @@ async def resolve_ticket(req: TicketResolveRequest):
     state = await resolve_ticket_and_resume(req.ticket_id)
     return {"state": state}
 
-
-# ---------------------------------------------------------------------------
-# Serve the frontend
-# ---------------------------------------------------------------------------
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

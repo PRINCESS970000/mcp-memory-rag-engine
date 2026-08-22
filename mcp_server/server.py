@@ -21,6 +21,10 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+import graduation_tools
+graduation_tools.register(mcp, get_db_connection)
+
+
 
 def init_messages_table():
     """Creates operational tables only. Infrastructure tables (checkpoints,
@@ -700,7 +704,7 @@ async def request_student_evaluation(student_id: int, session_id: str, ctx: Cont
 # المشتركة معرّفة بالفعل -- بيتفادى circular import كان بيحصل لما
 # scholarship_tools.py / internship_tools.py بيحاولوا يعملوا
 # "from server import get_db_connection" وهي لسه مانتعرّفتش.
-import scholarship_tools
+
 import internship_tools
 
 if __name__ == "__main__":

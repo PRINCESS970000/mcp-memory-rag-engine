@@ -17,10 +17,9 @@ const GRAPH_FIELDS = {
     { id: "student_id", label: "student_id", type: "number", value: 1 },
     { id: "student_email", label: "student_email", type: "text", value: "omar.k@brightpeak.edu" },
   ],
-  scholarship: [
+    graduation: [
     { id: "student_id", label: "student_id", type: "number", value: 1 },
-    { id: "requested_amount", label: "requested_amount", type: "number", value: 1000 },
-    { id: "sponsor_name", label: "sponsor_name", type: "text", value: "Demo Sponsor" },
+    { id: "department", label: "department", type: "text", value: "Computer Science" },
   ],
   internship: [
     { id: "student_id", label: "student_id", type: "number", value: 1 },
