@@ -29,8 +29,8 @@ from state_graph.base import (
     save_checkpoint,
     load_latest_checkpoint,
     create_hitl_task,
-    create_failure_ticket,
 )
+from state_graph.tickets.dedupe import create_ticket_if_not_open
 from state_graph.mcp_client_internship import call_mcp_tool
 from state_graph.rag_client_internship import retrieve_internship_policy
 
@@ -302,15 +302,18 @@ async def run_internship_graph(
     thread_id: str,
     start_node: str,
     state: GraphInternalState,
-    _crash_after_node: Optional[str] = None,  # للاستخدام في demo فقط
+    _crash_after_node: Optional[str] = None,
 ) -> GraphInternalState:
     current_node = start_node
+    steps = 0
+    max_steps = 30  # حماية ضد أي loop لانهائي بسبب باگ أو تضارب بيانات
 
-    while current_node is not None:
+    while current_node is not None and steps < max_steps:
         node_fn = NODE_FUNCS[current_node]
         update = await node_fn(state)
         state.update(update)
         state["_last_node"] = current_node
+        steps += 1
 
         save_checkpoint(thread_id, current_node, dict(state))
 
@@ -327,7 +330,7 @@ async def run_internship_graph(
             return state
 
         if "_ticket_error" in update:
-            ticket_id = create_failure_ticket(thread_id, current_node, update["_ticket_error"])
+            ticket_id = create_ticket_if_not_open(thread_id, current_node, update["_ticket_error"])
             state["pending_ticket_id"] = ticket_id
             save_checkpoint(thread_id, current_node, dict(state))
             print(f">>> توقف بسبب ticket #{ticket_id} -- في انتظار حل العطل")
@@ -335,9 +338,19 @@ async def run_internship_graph(
 
         current_node = ROUTES[current_node](state)
 
+    if steps >= max_steps:
+        ticket_id = create_ticket_if_not_open(
+            thread_id, state.get("_last_node", "unknown"),
+            f"Exceeded max_steps ({max_steps}) -- likely oscillation between "
+            f"external-signal state and a readiness check that never matches it."
+        )
+        state["pending_ticket_id"] = ticket_id
+        save_checkpoint(thread_id, "run_internship_graph", state)
+        print(f">>> توقف قسريًا بعد {max_steps} خطوة -- تذكرة #{ticket_id} اتفتحت")
+        return state
+
     print(">>> الـ run وصل لنهاية الـ graph أو نقطة انتظار حقيقية.")
     return state
-
 
 # ---------------------------------------------------------------------------
 # 6) نقاط الدخول
@@ -408,11 +421,17 @@ async def run_or_resume_graph(thread_id: str) -> GraphInternalState:
         state["pending_ticket_id"] = None
         return await run_internship_graph(thread_id, start_node=last_node, state=state)
 
+        # عقد الانتظار الخارجي (wait nodes) لازم تتنفذ من جديد عند كل Resume،
+    # مش يتحسب اللي بعدها مباشرة -- الـ node نفسها هي اللي بتفحص هل
+    # وصلت إشارة خارجية جديدة (set_external_signal) ولا لأ.
+    WAIT_NODES = {"wait_course_completion", "await_company_response"}
+
     if last_node is None:
         next_node = "analyze_skill_gap"
+    elif last_node in WAIT_NODES:
+        next_node = last_node
     else:
         next_node = ROUTES[last_node](state)
-
     if next_node is None:
         print(">>> الـ run خلص بالفعل أو لسه واقف عند نقطة انتظار حقيقية.")
         return state

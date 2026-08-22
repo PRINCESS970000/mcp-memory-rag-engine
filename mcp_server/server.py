@@ -706,6 +706,7 @@ async def request_student_evaluation(student_id: int, session_id: str, ctx: Cont
 # "from server import get_db_connection" وهي لسه مانتعرّفتش.
 
 import internship_tools
+internship_tools.register(mcp, get_db_connection)
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "http":
