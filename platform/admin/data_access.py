@@ -22,7 +22,30 @@ def _register_graduation_graph():
     GRAPH_REGISTRY["graduation"] = graph_2_graduation.run_or_resume_graph
  
  
+def _register_internship_graph():
+    import graph_3_internship
+    GRAPH_REGISTRY["internship"] = graph_3_internship.run_or_resume_graph
+ 
+ 
+def _register_study_abroad_graph():
+    # graph_1_study_abroad.run_or_resume_graph is defined as a plain
+    # "def" (sync), while graduation/internship are "async def". Every
+    # caller in this file does `await run_or_resume_fn(...)`, so
+    # registering the sync function directly would raise
+    # "object dict can't be used in 'await' expression" the first time
+    # an admin resolves a study_abroad HITL task/ticket. Wrapped here
+    # instead of editing graph_1 itself, to keep this a one-file fix.
+    import graph_1_study_abroad
+
+    async def _resume(thread_id):
+        return graph_1_study_abroad.run_or_resume_graph(thread_id)
+
+    GRAPH_REGISTRY["study_abroad"] = _resume
+ 
+ 
 _register_graduation_graph()
+_register_internship_graph()
+_register_study_abroad_graph()
  
  
 def _infer_graph_type_from_thread_id(thread_id: str) -> Optional[str]:

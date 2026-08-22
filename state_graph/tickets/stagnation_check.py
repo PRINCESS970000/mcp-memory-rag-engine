@@ -27,7 +27,10 @@ from state_graph.base import get_db_connection, create_failure_ticket
 # الإنتاج الحقيقي المفروض تتغير لساعات/أيام حسب طبيعة كل انتظار.
 STAGNATION_RULES: Dict[str, timedelta] = {
     "pending_external": timedelta(minutes=30),          # graph_1 (study abroad)
-    "awaiting_sponsor_verification": timedelta(minutes=30),  # graph_2 (scholarship)
+    "student_correction": timedelta(minutes=30),         # graph_2 (graduation: مادة ناقصة)
+    "financial_hold": timedelta(minutes=30),              # graph_2 (graduation: سداد معلّق)
+    "library_issue": timedelta(minutes=30),               # graph_2 (graduation: مشكلة مكتبة)
+    "student_upload": timedelta(minutes=30),              # graph_2 (graduation: مستند ناقص)
     "course_in_progress": timedelta(hours=2),             # graph_3 (internship: كورس)
     "submitted_awaiting_company": timedelta(minutes=30),   # graph_3 (internship: رد شركة)
 }

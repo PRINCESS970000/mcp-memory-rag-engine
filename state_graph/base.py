@@ -17,7 +17,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 # مسار واحد موحّد لكل الـ graphs الثلاثة - محدش يغيّره في نسخته
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "db", "brightpeak.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "brightpeak.db")
 DB_PATH = os.path.abspath(DB_PATH)
 
 

@@ -1,3 +1,168 @@
+# Final Project — State Graphs, Human-in-the-Loop, and the Platform
+
+This section covers the Final Project layer built on top of the existing
+`mcp_server/`, `db/`, and the agents from the previous three labs
+(MCP Server Lab, Memory & RAG Lab, Decomposition & Planning Lab).
+
+## The three state-graph problems
+
+| # | Graph | Owner | File |
+|---|---|---|---|
+| 1 | Study Abroad & Internship Placement Coordination | Person 1 | `state_graph/graph_1_study_abroad.py` |
+| 2 | Graduation Clearance | Person 2 | `state_graph/graph_2_graduation.py` |
+| 3 | Internship Readiness & Application | Person 3 (Eman) | `state_graph/graph_3_internship.py` |
+
+None of the three is a re-skin of the scheduling problem from the
+Decomposition & Planning Lab or the retrieval problem from the Memory &
+RAG Lab — each is a genuinely new agent scope with its own real wait, real
+external branch, and real failure mode:
+
+### Graph 3 — Internship Readiness & Application (owned by Eman)
+
+- **Why a state graph:** a student's path from "interested in a role" to
+  "hired" spans a real course-completion wait (`course_in_progress`, can
+  be weeks) and a real company-response wait after submission
+  (`submitted_awaiting_company`) — neither is resolvable by a retry.
+- **Real branch outside the model's control:** whether the company
+  accepts or rejects is an external decision, not something the graph
+  computes.
+- **Real failure mode:** an unrecognized `role_title` or a broken MCP
+  call opens a `failure_ticket`, distinct from the HITL path.
+- **Two of the four additions used, and why:**
+  - *RAG* (`node_analyze_skill_gap`) — pulls the role's real required
+    skills and BrightPeak's course catalog instead of letting the model
+    guess what a role needs.
+  - *Task decomposition* (`node_check_readiness`) — breaks "is this
+    student ready to apply?" into four checked steps (`skills`, `cv`,
+    `courses`, `documents`) instead of one opaque yes/no.
+- **HITL condition:** submitting the application to a real external
+  company is irreversible, so `node_hitl_submit_gate` always pauses for
+  Admin/advisor sign-off before `node_submit_application` runs —
+  regardless of how confident the readiness check is.
+- **Ticket path:** any failed MCP call (e.g. `get_role_requirements` on a
+  role that doesn't exist) opens a ticket via
+  `state_graph/tickets/dedupe.py`, separate from the HITL table.
+- **Proof of checkpointing (crash-and-resume):** `state_graph/test_internship_flows.py`
+  starts a run, kills the process with `os._exit(1)` right after
+  `analyze_skill_gap`, restarts in a new process, and shows the run
+  resuming at `check_readiness` without re-calling `analyze_skill_gap` —
+  the same three flows (HITL, ticket, crash-resume) are proven end to end
+  through the **same functions the platform's admin UI calls**
+  (`platform/admin/data_access.py`), not a separate test-only code path.
+
+### Graph 2 — Graduation Clearance (owned by teammate)
+
+- **Why a state graph:** clearance depends on academic status, an
+  outstanding financial balance, a library debt, and required documents —
+  each can be missing and each is fixed by the *student*, not the agent,
+  on their own schedule.
+- **Real branch:** whether each check passes depends on live data
+  (`get_academic_status`, `get_financial_status`, `get_library_status`,
+  `get_required_documents`), not a model guess.
+- **Two additions used:** RAG (graduation policy retrieval) + constrained
+  ReAct (each check node may only call its one designated MCP tool).
+- **HITL condition:** `node_admin_approval` — final graduation sign-off
+  is irreversible and always requires Admin approval once every
+  automated check has cleared.
+- **Correction made this project:** the four correction loops
+  (`student_correction`, `financial_hold`, `library_issue`,
+  `student_upload`) originally routed straight back to their check node
+  *inside the same synchronous call*, up to `max_corrections` times in
+  one shot — meaning the "wait" never actually paused across turns, the
+  opposite of what a state graph is supposed to prove. Fixed so each of
+  the four now returns `None` (a genuine pause, checkpointed), and
+  `run_or_resume_graph` re-checks the underlying condition only when
+  something calls resume again — so `total_corrections` now reflects real
+  separate attempts over time, not iterations inside one function call.
+
+### Graph 1 — Study Abroad & Internship Placement Coordination (owned by teammate)
+
+- **Why a state graph:** a nomination depends on a host university or
+  company's reply and an interview schedule, both external and
+  unpredictable in timing.
+- **Real failure mode:** a rejection or an expired application window
+  re-routes the student to a second-choice option without losing the
+  completed application data already collected.
+- **Two additions used:** LATS (ranks candidate placements against the
+  student's academic/financial record) + constrained ReAct (submits only
+  through the whitelisted MCP tools).
+- **HITL condition:** final sign-off on the nomination letter or any
+  financial support requires direct Admin approval.
+
+## Shared infrastructure (not duplicated per graph)
+
+- **Checkpointing** — `state_graph/base.py`: `checkpoints`, `hitl_tasks`,
+  and `failure_tickets` tables, shared by all three graphs against the
+  same `db/brightpeak.db` used by the rest of the system (not a separate
+  database).
+- **Ticket system** — `state_graph/tickets/`:
+  - `dedupe.py` — prevents opening a duplicate ticket for the same
+    thread/node while one is already open.
+  - `resolve.py` — the single resolution path used by the platform.
+  - `stagnation_check.py` — a *scheduled* check (not a manual one) that
+    opens a ticket when a thread has been sitting in a real external-wait
+    state longer than that state's threshold (e.g.
+    `submitted_awaiting_company` > 30 minutes for the demo,
+    `course_in_progress` > 2 hours) — this is what proves a stall is
+    *detected*, not manually inserted for the demo.
+- **Platform** — `platform/admin/` (tool management, RAG document
+  management, HITL/ticket resolution) and `platform/user/` (agent
+  switcher + chat), both wired against the live `mcp_server/` and the
+  same `db/brightpeak.db`.
+
+## Corrections made to the existing system during this project
+
+1. **`state_graph/base.py`** — `DB_PATH` resolved one directory too high
+   (`"..", ".."` instead of `".."`), so every checkpoint, HITL task, and
+   ticket was silently being written to a *separate* SQLite file outside
+   the repository, disconnected from the real `db/brightpeak.db`. Fixed
+   to the correct single-`".."` path.
+2. **`platform/admin/data_access.py`** — `GRAPH_REGISTRY` only registered
+   the graduation graph; resolving a HITL task or ticket for the
+   internship or study-abroad graphs through the platform would have
+   raised an error. Registered both, and wrapped `graph_1_study_abroad`'s
+   `run_or_resume_graph` (a plain `def`) in a small `async` adapter,
+   since every call site in `data_access.py` does `await run_or_resume_fn(...)`.
+3. **`state_graph/graph_2_graduation.py`** — see "Graph 2" above: four
+   correction loops were resolving synchronously in one call instead of
+   genuinely pausing across turns.
+4. **`state_graph/tickets/stagnation_check.py`** — the stagnation rule
+   for graph 2 referenced a state name (`awaiting_sponsor_verification`)
+   left over from before the graph was renamed from "scholarship" to
+   "graduation", so it matched nothing. Replaced with the graph's actual
+   wait states.
+5. **`db/graduation_schema.sql`** — existed but was never applied
+   automatically by `db/init_db.py`, so a fresh clone would crash the
+   moment graph 2 tried to submit an application. Documented as a
+   required setup step below.
+6. **`mcp_server/server.py` / tool registration** — `scholarship_tools.py`
+   and the earlier internship tool file used to do `from server import
+   mcp, get_db_connection` at import time, before `server.py` had
+   finished defining `get_db_connection` — a circular import that broke
+   `python server.py` standalone. Fixed by switching to the
+   `register(mcp, get_db_connection)` pattern used by
+   `graduation_tools.py` and `internship_tools.py`.
+7. **Memory & RAG Lab** — see the "Agent integration" section above for
+   the three bugs already fixed there (router shadowing, Self-RAG
+   relevance floor, intent-routing priority).
+
+## Setup (updated)
+
+```bash
+pip install -r requirements.txt
+cd db
+python init_db.py
+python -c "import sqlite3; conn = sqlite3.connect('brightpeak.db'); conn.executescript(open('graduation_schema.sql', encoding='utf-8').read()); conn.commit()"
+cd ..
+```
+
+## Demo evidence
+
+- `state_graph/test_internship_flows.py` — HITL, ticket, and
+  crash-and-resume for Graph 3, all through the real platform functions.
+- `state_graph/test_hitl_and_ticket.py` — HITL and ticket for Graph 2.
+- [add: recording/transcript for Graph 1's HITL + crash-resume]
+- [add: screen recording of the admin and user platform surfaces]
 # BrightPeak Academy — Memory & RAG Engine
 
 Extension of the existing `mcp_server/` and `db/` (from the MCP Server Lab)

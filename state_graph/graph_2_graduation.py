@@ -217,9 +217,10 @@ def route_after_academic_check(state: GraphInternalState) -> Optional[str]:
 
 
 def route_after_student_correction(state: GraphInternalState) -> Optional[str]:
-    if _exceeded_corrections(state):
-        return "rejected"
-    return "academic_check"   # <-- Loop 1
+    # توقف حقيقي هنا -- الطالب محتاج يسجل مادة ناقصة، ده ممكن ياخد أيام.
+    # run_or_resume_graph هو اللي بيقرر يعيد فحص academic_check تاني
+    # لما حد ينادي resume، مش الـ loop بيكمل لوحده فورًا.
+    return None
 
 
 def route_after_financial_check(state: GraphInternalState) -> Optional[str]:
@@ -229,9 +230,8 @@ def route_after_financial_check(state: GraphInternalState) -> Optional[str]:
 
 
 def route_after_financial_hold(state: GraphInternalState) -> Optional[str]:
-    if _exceeded_corrections(state):
-        return "rejected"
-    return "financial_check"   # <-- Loop 2
+    # توقف حقيقي -- في انتظار سداد فعلي من الطالب.
+    return None
 
 
 def route_after_library_check(state: GraphInternalState) -> Optional[str]:
@@ -241,9 +241,8 @@ def route_after_library_check(state: GraphInternalState) -> Optional[str]:
 
 
 def route_after_library_issue(state: GraphInternalState) -> Optional[str]:
-    if _exceeded_corrections(state):
-        return "rejected"
-    return "library_check"   # <-- Loop 3
+    # توقف حقيقي -- في انتظار إرجاع كتاب/سداد غرامة فعليًا.
+    return None
 
 
 def route_after_document_check(state: GraphInternalState) -> Optional[str]:
@@ -253,9 +252,8 @@ def route_after_document_check(state: GraphInternalState) -> Optional[str]:
 
 
 def route_after_student_upload(state: GraphInternalState) -> Optional[str]:
-    if _exceeded_corrections(state):
-        return "rejected"
-    return "document_check"   # <-- Loop 4
+    # توقف حقيقي -- في انتظار رفع مستند فعلي من الطالب.
+    return None
 
 
 def route_after_admin_approval(state: GraphInternalState) -> Optional[str]:
@@ -380,6 +378,21 @@ async def run_or_resume_graph(thread_id: str) -> GraphInternalState:
 
         state["pending_ticket_id"] = None
         return await run_graduation_graph(thread_id, start_node=last_node, state=state)
+
+    # نقط الانتظار الحقيقي -- لما حد ينادي resume، لازم نعيد فحص
+    # الحالة الأصلية تاني (مش نفترض إن حاجة اتصلحت من غير ما نتأكد)،
+    # ونشيك سقف عدد المحاولات هنا بدل ما نلف جوه نفس الاستدعاء المتزامن.
+    WAIT_TO_RECHECK = {
+        "student_correction": "academic_check",
+        "financial_hold": "financial_check",
+        "library_issue": "library_check",
+        "student_upload": "document_check",
+    }
+
+    if last_node in WAIT_TO_RECHECK:
+        if _exceeded_corrections(state):
+            return await run_graduation_graph(thread_id, start_node="rejected", state=state)
+        return await run_graduation_graph(thread_id, start_node=WAIT_TO_RECHECK[last_node], state=state)
 
     if last_node is None:
         next_node = "academic_check"
