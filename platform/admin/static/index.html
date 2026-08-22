@@ -1,120 +1,163 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>Brightpeak Admin Dashboard</title>
 <style>
-  body { font-family: sans-serif; background: #0f1115; color: #e6e6e6; padding: 24px; }
+  body { font-family: sans-serif; background: #0f1115; color: #e6e6e6; padding: 24px; max-width: 900px; margin: auto; }
   h1 { font-size: 20px; }
   h2 { font-size: 16px; margin-top: 32px; border-bottom: 1px solid #333; padding-bottom: 8px; }
-  .card {
-    background: #1a1d24; border: 1px solid #2a2d34; border-radius: 8px;
-    padding: 16px; margin-bottom: 12px;
-  }
+  .card { background: #1a1d24; border: 1px solid #2a2d34; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
   .badge-graph { background: #2b3a55; color: #8fb4ff; }
+  .badge-off { background: #4a2b2b; color: #ff9a8f; }
   .reason { margin: 8px 0; }
   .details { font-size: 13px; color: #999; white-space: pre-wrap; }
-  button {
-    padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer;
-    margin-inline-end: 8px; font-size: 13px;
-  }
+  button { padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer; margin-inline-end: 8px; font-size: 13px; }
   .approve { background: #2e7d4f; color: white; }
   .reject { background: #a3403f; color: white; }
   .resolve { background: #3a6ea5; color: white; }
   .empty { color: #666; font-style: italic; }
+  input, textarea { width: 100%; background: #0f1115; color: #e6e6e6; border: 1px solid #333; border-radius: 4px; padding: 6px; margin-bottom: 6px; box-sizing: border-box; }
 </style>
 </head>
 <body>
 
-<h1>Brightpeak</h1>
-<h2>(HITL)</h2>
-<div id="hitl-list"><p class="empty">loading..</p></div>
+<h1>Brightpeak Admin Dashboard</h1>
 
-<h2>(Tickets)</h2>
-<div id="tickets-list"><p class="empty">loading.</p></div>
+<h2>Pending Decisions (HITL)</h2>
+<div id="hitl-list"><p class="empty">Loading...</p></div>
+
+<h2>Open Failure Tickets</h2>
+<div id="tickets-list"><p class="empty">Loading...</p></div>
+
+<h2>MCP Tools (per agent)</h2>
+<div id="tools-list"><p class="empty">Loading...</p></div>
+
+<h2>RAG Documents</h2>
+<div class="card">
+  <input id="doc-id" placeholder="document id (e.g. financial-aid-policy-002)">
+  <input id="doc-type" placeholder="policy_type (e.g. graduation_policy)">
+  <input id="doc-title" placeholder="section title">
+  <textarea id="doc-text" rows="3" placeholder="policy text"></textarea>
+  <button class="approve" onclick="addRagDoc()">Add Document</button>
+</div>
+<div id="rag-list"><p class="empty">Loading...</p></div>
 
 <script>
 async function loadHitl() {
   const res = await fetch('/api/hitl');
   const tasks = await res.json();
-  const container = document.getElementById('hitl-list');
-  container.innerHTML = '';
-
-  if (tasks.length === 0) {
-    container.innerHTML = '<p class="empty">مفيش مهام معلقة دلوقتي.</p>';
-    return;
-  }
-
-  for (const task of tasks) {
+  const c = document.getElementById('hitl-list');
+  c.innerHTML = tasks.length === 0 ? '<p class="empty">No pending tasks.</p>' : '';
+  for (const t of tasks) {
     const div = document.createElement('div');
     div.className = 'card';
     div.innerHTML = `
-      <span class="badge badge-graph">${task.graph_type || 'unknown'}</span>
-      <span style="color:#666; font-size:12px;">thread: ${task.thread_id}</span>
-      <p class="reason">${task.reason}</p>
-      <div class="details">${JSON.stringify(task.details, null, 2)}</div>
+      <span class="badge badge-graph">${t.graph_type || 'unknown'}</span>
+      <span style="color:#666;font-size:12px;">thread: ${t.thread_id}</span>
+      <p class="reason">${t.reason}</p>
+      <div class="details">${JSON.stringify(t.details, null, 2)}</div>
       <div style="margin-top:12px;">
-        <button class="approve" onclick="resolveHitl(${task.id}, true)">اعتماد</button>
-        <button class="reject" onclick="resolveHitl(${task.id}, false)">رفض</button>
-      </div>
-    `;
-    container.appendChild(div);
+        <button class="approve" onclick="resolveHitl(${t.id}, true)">Approve</button>
+        <button class="reject" onclick="resolveHitl(${t.id}, false)">Reject</button>
+      </div>`;
+    c.appendChild(div);
   }
 }
-
 async function resolveHitl(id, approved) {
-  const res = await fetch(`/api/hitl/${id}/resolve`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ approved })
-  });
-  if (!res.ok) {
-    alert( 'eror when loading' + (await res.text()));
-    return;
-  }
-  await loadHitl();
-  await loadTickets();
+  const res = await fetch(`/api/hitl/${id}/resolve`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({approved}) });
+  if (!res.ok) { alert('Error: ' + await res.text()); return; }
+  await loadAll();
 }
 
 async function loadTickets() {
   const res = await fetch('/api/tickets');
   const tickets = await res.json();
-  const container = document.getElementById('tickets-list');
-  container.innerHTML = '';
-
-  if (tickets.length === 0) {
-    container.innerHTML = '<p class="empty">No open tickets at the moment.</p>';
-    return;
-  }
-
-  for (const ticket of tickets) {
+  const c = document.getElementById('tickets-list');
+  c.innerHTML = tickets.length === 0 ? '<p class="empty">No open tickets.</p>' : '';
+  for (const t of tickets) {
     const div = document.createElement('div');
     div.className = 'card';
     div.innerHTML = `
-      <span class="badge badge-graph">${ticket.graph_type || 'unknown'}</span>
-      <span style="color:#666; font-size:12px;">thread: ${ticket.thread_id} -- node: ${ticket.node_name}</span>
-      <p class="reason">${ticket.error_message}</p>
+      <span class="badge badge-graph">${t.graph_type || 'unknown'}</span>
+      <span style="color:#666;font-size:12px;">thread: ${t.thread_id} -- node: ${t.node_name}</span>
+      <p class="reason">${t.error_message}</p>
       <div style="margin-top:12px;">
-        <button class="resolve" onclick="resolveTicket(${ticket.id})">run</button>
-      </div>
-    `;
-    container.appendChild(div);
+        <button class="resolve" onclick="resolveTicket(${t.id})">Mark Resolved & Resume</button>
+      </div>`;
+    c.appendChild(div);
   }
 }
-
 async function resolveTicket(id) {
   const res = await fetch(`/api/tickets/${id}/resolve`, { method: 'POST' });
-  if (!res.ok) {
-    alert('Error when loading' + (await res.text()));
-    return;
-  }
-  await loadHitl();
-  await loadTickets();
+  if (!res.ok) { alert('Error: ' + await res.text()); return; }
+  await loadAll();
 }
 
-loadHitl();
-loadTickets();
+async function loadTools() {
+  const res = await fetch('/api/tools');
+  const tools = await res.json();
+  const c = document.getElementById('tools-list');
+  c.innerHTML = '';
+  for (const t of tools) {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `
+      <span class="badge ${t.enabled ? 'badge-graph' : 'badge-off'}">${t.enabled ? 'active' : 'disabled'}</span>
+      <b>${t.tool_name}</b>
+      <button class="${t.enabled ? 'reject' : 'approve'}" onclick="toggleTool('${t.tool_name}')">
+        ${t.enabled ? 'Disable' : 'Enable'}
+      </button>`;
+    c.appendChild(div);
+  }
+}
+async function toggleTool(name) {
+  const res = await fetch(`/api/tools/${name}/toggle`, { method: 'POST' });
+  if (!res.ok) { alert('Error: ' + await res.text()); return; }
+  await loadTools();
+}
+
+async function loadRagDocs() {
+  const res = await fetch('/api/rag/documents');
+  const docs = await res.json();
+  const c = document.getElementById('rag-list');
+  c.innerHTML = docs.length === 0 ? '<p class="empty">No documents yet.</p>' : '';
+  for (const d of docs) {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `
+      <span class="badge badge-graph">${d.metadata.policy_type || ''}</span>
+      <b>${d.id}</b>
+      <p class="details">${d.text}...</p>
+      <button class="reject" onclick="deleteRagDoc('${d.id}')">Delete</button>`;
+    c.appendChild(div);
+  }
+}
+async function addRagDoc() {
+  const doc = {
+    id: document.getElementById('doc-id').value,
+    text: document.getElementById('doc-text').value,
+    policy_type: document.getElementById('doc-type').value,
+    section_title: document.getElementById('doc-title').value,
+  };
+  const res = await fetch('/api/rag/documents', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(doc) });
+  if (!res.ok) { alert('Error: ' + await res.text()); return; }
+  await loadRagDocs();
+}
+async function deleteRagDoc(id) {
+  const res = await fetch(`/api/rag/documents/${id}`, { method: 'DELETE' });
+  if (!res.ok) { alert('Error: ' + await res.text()); return; }
+  await loadRagDocs();
+}
+
+async function loadAll() {
+  await loadHitl();
+  await loadTickets();
+  await loadTools();
+  await loadRagDocs();
+}
+loadAll();
 </script>
 
 </body>

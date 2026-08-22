@@ -32,7 +32,7 @@ async def start_and_crash():
         "_last_node": None,
     }
 
-    print("start run/....")
+    print(">>> Starting the first run...")
     await run_graduation_graph(
         THREAD_ID, start_node="academic_check", state=initial_state, _crash_after_node="academic_check"
     )
@@ -41,13 +41,13 @@ async def start_and_crash():
 async def resume():
     saved_state = base.load_latest_checkpoint(THREAD_ID)
     if saved_state is None:
-        print(">>> مفيش checkpoint محفوظ -- شغلي 'start' الأول.")
+        print(">>> No checkpoint found -- run 'start' first.")
         return
 
-    print(f">>> آخر node اتنفذ = {saved_state.get('_last_node')}, current_state = {saved_state.get('current_state')}")
-    print(">>> إكمال الـ run...")
+    print(f">>> Last executed node = {saved_state.get('_last_node')}, current_state = {saved_state.get('current_state')}")
+    print(">>> Resuming the run...")
     await run_or_resume_graph(THREAD_ID)
-    print(">>> خلص من غير ما node academic_check يتنفذ تاني.")
+    print(">>> Finished without re-running node academic_check.")
 
 
 if __name__ == "__main__":

@@ -98,10 +98,13 @@ async def node_academic_check(state: GraphInternalState) -> dict:
     """RAG + Constrained ReAct."""
     print(">>> [RUNNING academic_check]")
 
+    print(">>> [RAG] Retrieving graduation policy from shared vector store...")
     policy_text = retrieve_scholarship_policy(
-        query=f"متطلبات التخرج لقسم {state['department']}"
+        query=f"graduation requirements for department {state['department']}"
     )
+    print(f">>> [RAG] Retrieved text: {policy_text[:150] if policy_text else '(empty -- RAG config needed)'}")
 
+    print(">>> [Constrained ReAct] Calling MCP tool: get_academic_status (only tool allowed here)")
     update = await _run_check(
         state,
         tool_name="get_academic_status",
@@ -109,13 +112,15 @@ async def node_academic_check(state: GraphInternalState) -> dict:
         problem_state=GraduationState.MISSING_COURSE.value,
         extra_kwargs={"department": state["department"]},
     )
+    print(f">>> [Constrained ReAct] Tool result: current_state -> {update.get('current_state')}")
+
     update["policy_context"] = policy_text
     return update
 
 
 async def node_student_correction(state: GraphInternalState) -> dict:
     """حالة انتظار: الطالب لازم يصلح وضعه الأكاديمي (يسجل مادة ناقصة مثلًا)."""
-    print(" [RUNNING student_correction] ")
+    print(">>> [RUNNING student_correction] -- waiting for student to fix academic issue")
     return {"total_corrections": state["total_corrections"] + 1}
 
 
@@ -127,7 +132,7 @@ async def node_financial_check(state: GraphInternalState) -> dict:
 
 
 async def node_financial_hold(state: GraphInternalState) -> dict:
-    print(">>> [RUNNING financial_hold] -- في انتظار سداد المستحقات")
+    print(">>> [RUNNING financial_hold] -- waiting for outstanding payment")
     return {"total_corrections": state["total_corrections"] + 1}
 
 
@@ -139,7 +144,7 @@ async def node_library_check(state: GraphInternalState) -> dict:
 
 
 async def node_library_issue(state: GraphInternalState) -> dict:
-    print(">>> [RUNNING library_issue] -- في انتظار إرجاع الكتب/سداد الغرامة")
+    print(">>> [RUNNING library_issue] -- waiting for book return / fine payment")
     return {"total_corrections": state["total_corrections"] + 1}
 
 
@@ -151,13 +156,13 @@ async def node_document_check(state: GraphInternalState) -> dict:
 
 
 async def node_student_upload(state: GraphInternalState) -> dict:
-    print(">>> [RUNNING student_upload] -- في انتظار رفع المستندات")
+    print(">>> [RUNNING student_upload] -- waiting for document upload")
     return {"total_corrections": state["total_corrections"] + 1}
 
 
 async def node_admin_approval(state: GraphInternalState) -> dict:
     """HITL node: اعتماد التخرج النهائي قرار لا رجعة فيه."""
-    print(">>> [RUNNING admin_approval] -- هيتم فتح HITL task")
+    print(">>> [RUNNING admin_approval] -- opening HITL task")
     return {
         "current_state": GraduationState.AWAITING_ADMIN_APPROVAL.value,
         "_hitl_request": {
@@ -294,7 +299,7 @@ async def run_graduation_graph(
         base.save_checkpoint(thread_id, current_node, dict(state))
 
         if _crash_after_node == current_node:
-            print(">>> [DEMO] محاكاة انهيار العملية الآن (os._exit)")
+            print(">>> [DEMO] simulating a process crash now (os._exit)")
             import os
             os._exit(1)
 
@@ -303,19 +308,19 @@ async def run_graduation_graph(
             hitl_id = base.create_hitl_task(thread_id, req["reason"], req.get("details", {}))
             state["pending_hitl_id"] = hitl_id
             base.save_checkpoint(thread_id, current_node, dict(state))
-            print(f">>> توقف عند HITL task #{hitl_id}")
+            print(f">>> Paused at HITL task #{hitl_id}")
             return state
 
         if "_ticket_error" in update:
             ticket_id = base.create_failure_ticket(thread_id, current_node, update["_ticket_error"])
             state["pending_ticket_id"] = ticket_id
             base.save_checkpoint(thread_id, current_node, dict(state))
-            print(f">>> توقف بسبب ticket #{ticket_id}")
+            print(f">>> Paused due to ticket #{ticket_id}")
             return state
 
         current_node = ROUTES[current_node](state)
 
-    print(">>> الـ run وصل لنهاية الـ graph.")
+    print(">>> Run reached the end of the graph.")
     return state
 
 
@@ -353,14 +358,14 @@ async def run_or_resume_graph(thread_id: str) -> GraphInternalState:
     """نقطة الدخول الموحدة -- نفس نمط graph_1_study_abroad.py."""
     state = base.load_latest_checkpoint(thread_id)
     if state is None:
-        raise ValueError(f"مفيش checkpoint لـ thread_id={thread_id} -- استخدمي start_new_application الأول.")
+        raise ValueError(f"No checkpoint found for thread_id={thread_id} -- call start_new_application first.")
 
     last_node = state.get("_last_node")
 
     if state.get("pending_hitl_id"):
         task = base.get_latest_hitl_task(thread_id)
         if task is None or task["status"] == "pending":
-            print(">>> لسه في انتظار قرار الأدمن.")
+            print(">>> Still waiting for admin decision.")
             return state
 
         state["pending_hitl_id"] = None
@@ -370,7 +375,7 @@ async def run_or_resume_graph(thread_id: str) -> GraphInternalState:
     if state.get("pending_ticket_id"):
         ticket_status = _get_ticket_status(state["pending_ticket_id"])
         if ticket_status != "resolved":
-            print(">>> لسه فيه ticket مفتوح.")
+            print(">>> Still has an open ticket.")
             return state
 
         state["pending_ticket_id"] = None
@@ -382,7 +387,7 @@ async def run_or_resume_graph(thread_id: str) -> GraphInternalState:
         next_node = ROUTES[last_node](state)
 
     if next_node is None:
-        print(">>> الـ run خلص بالفعل.")
+        print(">>> Run already finished.")
         return state
 
     return await run_graduation_graph(thread_id, start_node=next_node, state=state)
